@@ -1,0 +1,6 @@
+{
+  "name": "NewMe",
+  "description": "Personal Transformation & Discipline Tracker",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
