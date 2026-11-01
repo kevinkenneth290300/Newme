@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,22 +27,31 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.entity.UserProfileEntity
+import com.example.data.model.*
+import com.example.ui.components.NewMeIllustration
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.theme.*
 import com.example.util.NutritionCalculator
 import com.example.viewmodel.NewMeViewModel
 import java.time.LocalDate
-import kotlin.random.Random
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun OnboardingScreen(
     viewModel: NewMeViewModel,
     onLaunchToday: () -> Unit
 ) {
-    var step by remember { mutableIntStateOf(0) }
+    val initialProfile = viewModel.userProfile.value?.takeIf { it.isOnboarded || it.startDate.isNotBlank() }
+    val initialSettings = viewModel.appSettings.value
+    val saving by viewModel.savingOnboarding.collectAsStateWithLifecycle()
+    var step by rememberSaveable { mutableIntStateOf(0) }
+    var formError by rememberSaveable { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
+    LaunchedEffect(step, formError) { listState.scrollToItem(0) }
     val totalSteps = 11
 
     // Step 1: Name & Greeting
-    var name by remember { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf(initialProfile?.name.orEmpty()) }
 
     // Step 2: What are you trying to change? (multi-select)
     val changeOptions = listOf(
@@ -55,8 +66,8 @@ fun OnboardingScreen(
         "Feel mentally stronger",
         "Become more consistent"
     )
-    var selectedChanges by remember {
-        mutableStateOf(setOf("Become more disciplined", "Become more consistent", "Eat better"))
+    var selectedChanges by rememberSaveable {
+        mutableStateOf(initialProfile?.selectedGoals?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet())
     }
 
     // Step 3: Why starting now?
@@ -71,8 +82,8 @@ fun OnboardingScreen(
         "I simply want to become better",
         "Something else"
     )
-    var selectedReason by remember { mutableStateOf("I keep starting and stopping") }
-    var customReasonText by remember { mutableStateOf("") }
+    var selectedReason by rememberSaveable { mutableStateOf(initialProfile?.startingReason.orEmpty()) }
+    var customReasonText by rememberSaveable { mutableStateOf("") }
 
     // Step 4: Who are you becoming? (up to 3 identity traits)
     val identityOptions = listOf(
@@ -86,78 +97,89 @@ fun OnboardingScreen(
         "Energetic" to "⚡",
         "Resilient" to "🛡️"
     )
-    var selectedTraits by remember {
-        mutableStateOf(setOf("Disciplined", "Consistent", "Calm"))
+    var selectedTraits by rememberSaveable {
+        mutableStateOf(initialProfile?.identityTraits?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet())
     }
 
     // Step 5: Starting metrics
-    var ageText by remember { mutableStateOf("26") }
-    var sex by remember { mutableStateOf("Male") }
-    var heightText by remember { mutableStateOf("172") }
-    var weightText by remember { mutableStateOf("72.0") }
+    var ageText by rememberSaveable { mutableStateOf(initialProfile?.age?.toString().orEmpty()) }
+    var sex by rememberSaveable { mutableStateOf(initialProfile?.sex.orEmpty()) }
+    var heightText by rememberSaveable { mutableStateOf(initialProfile?.heightCm?.toString().orEmpty()) }
+    var weightText by rememberSaveable { mutableStateOf(initialProfile?.currentWeightKg?.toString().orEmpty()) }
 
     // Optional metrics with "I don't know this yet" toggles
-    var bodyFatText by remember { mutableStateOf("") }
-    var knowsBodyFat by remember { mutableStateOf(false) }
-    var muscleText by remember { mutableStateOf("") }
-    var knowsMuscle by remember { mutableStateOf(false) }
-    var waistText by remember { mutableStateOf("") }
-    var knowsWaist by remember { mutableStateOf(false) }
-    var inBodyText by remember { mutableStateOf("") }
-    var knowsInBody by remember { mutableStateOf(false) }
+    var bodyFatText by rememberSaveable { mutableStateOf(initialProfile?.bodyFatPercent?.toString().orEmpty()) }
+    var knowsBodyFat by rememberSaveable { mutableStateOf(initialProfile?.bodyFatPercent != null) }
+    var muscleText by rememberSaveable { mutableStateOf(initialProfile?.skeletalMuscleKg?.toString().orEmpty()) }
+    var knowsMuscle by rememberSaveable { mutableStateOf(initialProfile?.skeletalMuscleKg != null) }
+    var waistText by rememberSaveable { mutableStateOf(initialProfile?.waistCm?.toString().orEmpty()) }
+    var knowsWaist by rememberSaveable { mutableStateOf(initialProfile?.waistCm != null) }
+    var inBodyText by rememberSaveable { mutableStateOf(initialProfile?.inBodyScore?.toString().orEmpty()) }
+    var knowsInBody by rememberSaveable { mutableStateOf(initialProfile?.inBodyScore != null) }
+    var cycleChoice by rememberSaveable { mutableStateOf(initialSettings?.cycleEnabled ?: false) }
 
     // Step 6: What would progress look like?
     val progressGoalOptions = listOf(
-        "Fat-loss goal" to "Leaner waist, reduced body fat percentage",
-        "Muscle goal" to "Strength increases, skeletal muscle hypertrophy",
+        NutritionGoal.FAT_LOSS.label to "Move toward a body-fat reduction goal",
+        NutritionGoal.MUSCLE_GAIN.label to "Move toward a strength and muscle goal",
         "Target weight" to "Move toward a specific scale weight",
         "General health goal" to "Energy, longevity, vitality, peace of mind",
         "I don't know yet — help me decide" to "Sensible balanced foundation targets"
     )
-    var selectedProgressGoal by remember { mutableStateOf("General health goal") }
-    var targetWeightText by remember { mutableStateOf("") }
+    var selectedProgressGoal by rememberSaveable { mutableStateOf(when (initialProfile?.progressGoalType) {
+        "Fat-loss goal" -> NutritionGoal.FAT_LOSS.label
+        "Muscle goal" -> NutritionGoal.MUSCLE_GAIN.label
+        else -> initialProfile?.progressGoalType ?: NutritionGoal.GENERAL_HEALTH.label
+    }) }
+    var targetWeightText by rememberSaveable { mutableStateOf(initialProfile?.targetWeightKg?.toString().orEmpty()) }
 
     // Step 7: Real life fit
     val wakeTimeOptions = listOf("Before 6", "6–7", "7–8", "8+")
-    var selectedWakeTime by remember { mutableStateOf("6–7") }
+    var selectedWakeTime by rememberSaveable { mutableStateOf(initialProfile?.wakeTimeSlot.orEmpty()) }
 
     val sleepTimeOptions = listOf("9–10", "10–11", "11–12", "After 12")
-    var selectedSleepTime by remember { mutableStateOf("10–11") }
+    var selectedSleepTime by rememberSaveable { mutableStateOf(initialProfile?.sleepTimeSlot.orEmpty()) }
 
     val workOptions = listOf("Office", "Remote", "Hybrid", "Shift work", "Other")
-    var selectedWork by remember { mutableStateOf("Office") }
+    var selectedWork by rememberSaveable { mutableStateOf(initialProfile?.workType.orEmpty()) }
 
     val trainFreqOptions = listOf("2 days/week", "3 days/week", "4 days/week", "5+ days/week")
-    var selectedTrainFreq by remember { mutableStateOf("3 days/week") }
+    var selectedTrainFreq by rememberSaveable { mutableStateOf(initialProfile?.trainingFrequency.orEmpty()) }
+    var selectedActivities by rememberSaveable { mutableStateOf(initialProfile?.selectedActivities?.split(",")
+        ?.filter { it.isNotBlank() }?.map { ActivityKind.fromStored(it).name }?.toSet() ?: emptySet()) }
+    var supplementChoice by rememberSaveable { mutableStateOf(initialProfile?.usesSupplements ?: false) }
+    var mealSuggestionChoice by rememberSaveable { mutableStateOf(initialProfile?.usesRecommendedPlan ?: false) }
+    var streakGoal by rememberSaveable { mutableStateOf(if (initialSettings?.goalChosen == true) initialSettings.dailyGoalType else "") }
+    var streakTargetText by rememberSaveable { mutableStateOf(if (initialSettings?.goalChosen == true) initialSettings.dailyGoalTarget.toString() else "") }
 
     val difficultTimeOptions = listOf("Morning", "Afternoon", "Evening", "Late night", "Weekends")
-    var selectedDifficultTime by remember { mutableStateOf("Evening") }
+    var selectedDifficultTime by rememberSaveable { mutableStateOf(initialProfile?.difficultTimeOfDay.orEmpty()) }
 
     // Step 8: Food made easier
-    val dietOptions = listOf("Vegetarian", "Eggetarian", "Non-vegetarian", "Other")
-    var selectedDiet by remember { mutableStateOf("Vegetarian") }
+    val dietOptions = listOf("Vegetarian", "Eggetarian", "Non-vegetarian", "Vegan", "Other")
+    var selectedDiet by rememberSaveable { mutableStateOf(initialProfile?.dietaryPreference.orEmpty()) }
 
     val commonFoodList = listOf(
         "Rice", "Roti", "Eggs", "Chicken", "Fish",
         "Paneer", "Dal", "Oats", "Vegetables", "Fruit", "Curd / Yogurt", "Tofu"
     )
-    var selectedCommonFoods by remember {
-        mutableStateOf(setOf("Rice", "Roti", "Dal", "Vegetables", "Paneer"))
+    var selectedCommonFoods by rememberSaveable {
+        mutableStateOf(initialProfile?.commonFoods?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet())
     }
 
     val foodAvoidOptions = listOf(
         "Late-night snacking", "Deep fried snacks", "Sugary drinks / soda",
         "Refined flour (Maida)", "Alcohol", "Excessive sweets"
     )
-    var selectedAvoidedFoods by remember {
-        mutableStateOf(setOf("Sugary drinks / soda", "Late-night snacking"))
+    var selectedAvoidedFoods by rememberSaveable {
+        mutableStateOf(initialProfile?.avoidedFoods?.split(",")?.filter { it.isNotBlank() }?.toSet() ?: emptySet())
     }
 
     val cookingSituationOptions = listOf("I cook", "Someone cooks for me", "Mostly eat outside", "Combination")
-    var selectedCooking by remember { mutableStateOf("I cook") }
+    var selectedCooking by rememberSaveable { mutableStateOf(initialProfile?.cookingSituation.orEmpty()) }
 
     val mealPrepOptions = listOf("I meal prep regularly", "Sometimes", "Rarely")
-    var selectedMealPrep by remember { mutableStateOf("Sometimes") }
+    var selectedMealPrep by rememberSaveable { mutableStateOf(initialProfile?.mealPrepHabit.orEmpty()) }
 
     // Step 9: How should NewMe talk to you?
     val toneOptions = listOf(
@@ -166,39 +188,77 @@ fun OnboardingScreen(
         Triple("DIRECT COACH", "Direct Coach", "Honest, practical and willing to challenge you."),
         Triple("STRICT ACCOUNTABILITY", "Strict Accountability", "Push me when I'm avoiding what I know I should do.")
     )
-    var selectedTone by remember { mutableStateOf("BALANCED") }
+    var selectedTone by rememberSaveable { mutableStateOf(initialProfile?.companionTone ?: "BALANCED") }
 
     // Step 10: Voice
-    var voiceChoice by remember { mutableStateOf(false) }
+    var voiceChoice by rememberSaveable { mutableStateOf(initialProfile?.voiceEnabled ?: false) }
+
+    fun optionalMetric(enabled: Boolean, text: String, label: String): Float? = if (!enabled) null
+        else text.trim().toFloatOrNull() ?: throw IllegalArgumentException("Enter a valid $label or mark it unknown.")
+
+    fun validateBasics(includeTarget: Boolean = false) {
+        ProfileSex.fromStored(sex)
+        val target = if (includeTarget && selectedProgressGoal == NutritionGoal.TARGET_WEIGHT.label)
+            targetWeightText.trim().toFloatOrNull() ?: throw IllegalArgumentException("Enter a valid target weight.") else null
+        NutritionCalculator.validateMetrics(
+            ageText.trim().toIntOrNull() ?: throw IllegalArgumentException("Enter your age."),
+            heightText.trim().toFloatOrNull() ?: throw IllegalArgumentException("Enter your height in cm."),
+            weightText.trim().toFloatOrNull() ?: throw IllegalArgumentException("Enter your weight in kg."), target,
+            optionalMetric(knowsBodyFat, bodyFatText, "body-fat measurement"),
+            optionalMetric(knowsMuscle, muscleText, "muscle measurement"),
+            optionalMetric(knowsWaist, waistText, "waist measurement"),
+            if (knowsInBody) inBodyText.trim().toIntOrNull() ?: throw IllegalArgumentException("Enter a valid measurement score or mark it unknown.") else null
+        )
+    }
+
+    fun continueStep() {
+        try {
+            when (step) {
+                0 -> require(name.trim().isNotEmpty() && name.trim().length <= 80) { "Enter a name of 1 to 80 characters." }
+                4 -> validateBasics()
+                5 -> { NutritionGoal.fromStored(selectedProgressGoal); validateBasics(includeTarget = true) }
+                6 -> {
+                    val goal = DailyGoalKind.entries.firstOrNull { it.name == streakGoal }
+                        ?: throw IllegalArgumentException("Choose the daily goal that qualifies for your streak.")
+                    goal.validate(streakTargetText.toIntOrNull() ?: throw IllegalArgumentException("Enter a daily goal target."))
+                }
+                7 -> if (mealSuggestionChoice) require(selectedDiet.isNotBlank()) { "Choose a dietary preference for meal suggestions." }
+            }
+            formError = null
+            step++
+        } catch (error: IllegalArgumentException) {
+            formError = error.message
+        }
+    }
 
     // Execution
     fun saveAndLaunch() {
-        val parsedAge = ageText.toIntOrNull() ?: 26
-        val parsedHeight = heightText.toFloatOrNull() ?: 172f
-        val parsedWeight = weightText.toFloatOrNull() ?: 72f
-        val parsedTargetWeight = targetWeightText.toFloatOrNull()
+        try {
+        validateBasics(includeTarget = true)
+        require(name.trim().isNotEmpty()) { "Enter your name." }
+        val parsedAge = ageText.trim().toInt()
+        val parsedHeight = heightText.trim().toFloat()
+        val parsedWeight = weightText.trim().toFloat()
+        val parsedTargetWeight = if (selectedProgressGoal == NutritionGoal.TARGET_WEIGHT.label) targetWeightText.trim().toFloat() else null
         val parsedWaist = if (knowsWaist) waistText.toFloatOrNull() else null
         val parsedBodyFat = if (knowsBodyFat) bodyFatText.toFloatOrNull() else null
         val parsedMuscle = if (knowsMuscle) muscleText.toFloatOrNull() else null
         val parsedInBody = if (knowsInBody) inBodyText.toIntOrNull() else null
 
-        val primaryActivity = when (selectedTrainFreq) {
-            "4 days/week", "5+ days/week" -> "Gym / Strength Training"
-            "2 days/week", "3 days/week" -> "Gym / Strength Training"
-            else -> "General Active / Home Workouts"
-        }
+        val primaryActivity = selectedActivities.map { ActivityKind.valueOf(it) }.maxByOrNull { it.multiplier } ?: ActivityKind.NONE
+        val nutritionGoal = NutritionGoal.fromStored(selectedProgressGoal)
 
         val calculatedTargets = NutritionCalculator.calculateTargets(
             age = parsedAge,
-            sex = sex,
+            sex = ProfileSex.fromStored(sex),
             heightCm = parsedHeight,
             weightKg = parsedWeight,
             activityType = primaryActivity,
-            goal = selectedProgressGoal
+            goal = nutritionGoal,
+            targetWeightKg = parsedTargetWeight
         )
 
-        val cleanName = name.trim().ifBlank { "Jay" }
-        val generatedCode = "NEWME-${cleanName.take(3).uppercase()}-${Random.nextInt(1000, 9999)}"
+        val cleanName = name.trim()
 
         val finalStartingReason = if (selectedReason == "Something else" && customReasonText.isNotBlank()) {
             customReasonText.trim()
@@ -219,8 +279,8 @@ fun OnboardingScreen(
             skeletalMuscleKg = parsedMuscle,
             waistCm = parsedWaist,
             inBodyScore = parsedInBody,
-            primaryActivityType = primaryActivity,
-            primaryGoal = selectedProgressGoal,
+            primaryActivityType = primaryActivity.name,
+            primaryGoal = nutritionGoal.name,
             bmr = calculatedTargets.bmr,
             tdee = calculatedTargets.tdee,
             calorieTarget = calculatedTargets.calorieTarget,
@@ -233,16 +293,17 @@ fun OnboardingScreen(
                 "5+ days/week" -> 5
                 "4 days/week" -> 4
                 "3 days/week" -> 3
-                else -> 2
+                "2 days/week" -> 2
+                else -> 0
             },
             goalDescription = selectedChanges.joinToString(", "),
             selectedGoals = selectedChanges.joinToString(","),
-            selectedActivities = "Gym / Strength Training, Brisk Walking",
-            activityFrequencies = "Gym: $selectedTrainFreq; Walking: Daily",
+            selectedActivities = selectedActivities.joinToString(","),
+            activityFrequencies = selectedTrainFreq,
             trackingLevel = "Focused",
             dietaryPreference = selectedDiet,
-            usesSupplements = true,
-            usesRecommendedPlan = true,
+            usesSupplements = supplementChoice,
+            usesRecommendedPlan = mealSuggestionChoice,
             usesHealthConnect = false,
             voiceEnabled = voiceChoice,
             speakMorning = voiceChoice,
@@ -272,12 +333,18 @@ fun OnboardingScreen(
             cookingSituation = selectedCooking,
             mealPrepHabit = selectedMealPrep,
             companionTone = selectedTone,
-            friendCode = generatedCode,
+            friendCode = initialProfile?.friendCode.orEmpty(),
             hasSeenFirstMorningWelcome = false
         )
 
-        viewModel.completeOnboarding(profile)
-        onLaunchToday()
+        val goal = DailyGoalKind.entries.firstOrNull { it.name == streakGoal }
+            ?: throw IllegalArgumentException("Choose a daily streak goal.")
+        val target = streakTargetText.toIntOrNull() ?: throw IllegalArgumentException("Enter a daily goal target.")
+        goal.validate(target)
+        viewModel.completeOnboarding(profile, OnboardingPreferences(goal, target, cycleChoice && sex == "Female"), onSaved = onLaunchToday)
+        } catch (error: IllegalArgumentException) {
+            formError = error.message
+        }
     }
 
     Scaffold(
@@ -316,7 +383,7 @@ fun OnboardingScreen(
                             color = NewMePrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp
+                            letterSpacing = 0.sp
                         )
                         Text(
                             text = "Step ${step + 1} of $totalSteps",
@@ -354,18 +421,24 @@ fun OnboardingScreen(
                 .background(NewMeBackground)
         ) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 20.dp),
                 contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                if (formError != null) item {
+                    Text(formError.orEmpty(), color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                }
                 when (step) {
                     // ==========================================
                     // SCREEN 1: Good to meet you
                     // ==========================================
                     0 -> {
                         item {
+                            NewMeIllustration()
                             Text(
                                 text = "Good to meet you.",
                                 color = NewMeTextPrimary,
@@ -387,14 +460,14 @@ fun OnboardingScreen(
                                 color = NewMePrimary,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                letterSpacing = 0.5.sp
+                                letterSpacing = 0.sp
                             )
                             Spacer(modifier = Modifier.height(8.dp))
 
                             OutlinedTextField(
                                 value = name,
                                 onValueChange = { name = it },
-                                placeholder = { Text("Enter your name (e.g., Jay)", color = NewMeTextMuted) },
+                                placeholder = { Text("Your name", color = NewMeTextMuted) },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = NewMePrimary,
@@ -404,7 +477,7 @@ fun OnboardingScreen(
                                     focusedContainerColor = NewMeSurface,
                                     unfocusedContainerColor = NewMeSurface
                                 ),
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("name_input_field")
@@ -436,7 +509,7 @@ fun OnboardingScreen(
                                     val isSelected = selectedChanges.contains(opt)
                                     Surface(
                                         color = if (isSelected) NewMePrimary.copy(alpha = 0.12f) else NewMeSurface,
-                                        shape = RoundedCornerShape(14.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         border = BorderStroke(
                                             1.dp,
                                             if (isSelected) NewMePrimary else NewMeBorder
@@ -502,7 +575,7 @@ fun OnboardingScreen(
                                     val isSelected = selectedReason == r
                                     Surface(
                                         color = if (isSelected) NewMePrimary.copy(alpha = 0.12f) else NewMeSurface,
-                                        shape = RoundedCornerShape(14.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         border = BorderStroke(
                                             1.dp,
                                             if (isSelected) NewMePrimary else NewMeBorder
@@ -549,7 +622,7 @@ fun OnboardingScreen(
                                             focusedContainerColor = NewMeSurface,
                                             unfocusedContainerColor = NewMeSurface
                                         ),
-                                        shape = RoundedCornerShape(12.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
@@ -588,7 +661,7 @@ fun OnboardingScreen(
                                     val isSelected = selectedTraits.contains(trait)
                                     Surface(
                                         color = if (isSelected) NewMePrimary.copy(alpha = 0.15f) else NewMeSurface,
-                                        shape = RoundedCornerShape(14.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         border = BorderStroke(
                                             1.dp,
                                             if (isSelected) NewMePrimary else NewMeBorder
@@ -666,10 +739,10 @@ fun OnboardingScreen(
                                     val isSelected = sex == s
                                     Surface(
                                         color = if (isSelected) NewMePrimary else NewMeSurface,
-                                        shape = RoundedCornerShape(12.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier
                                             .weight(1f)
-                                            .height(44.dp)
+                                            .heightIn(min = 44.dp)
                                             .clickable { sex = s },
                                         border = BorderStroke(1.dp, if (isSelected) NewMePrimary else NewMeBorder)
                                     ) {
@@ -685,6 +758,13 @@ fun OnboardingScreen(
                                 }
                             }
 
+                            if (sex == "Female") {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(checked = cycleChoice, onCheckedChange = { cycleChoice = it })
+                                    Text("Optional period tracking", color = NewMeTextPrimary, modifier = Modifier.weight(1f))
+                                }
+                                Text("Private, on-device history. Reminders are off by default. You can skip this.", color = NewMeTextMuted, fontSize = 12.sp)
+                            }
                             Spacer(modifier = Modifier.height(16.dp))
 
                             // Age & Height
@@ -700,7 +780,7 @@ fun OnboardingScreen(
                                         onValueChange = { ageText = it },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                         singleLine = true,
-                                        shape = RoundedCornerShape(12.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = NewMePrimary,
                                             unfocusedBorderColor = NewMeBorder,
@@ -718,7 +798,7 @@ fun OnboardingScreen(
                                         onValueChange = { heightText = it },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                         singleLine = true,
-                                        shape = RoundedCornerShape(12.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = NewMePrimary,
                                             unfocusedBorderColor = NewMeBorder,
@@ -740,7 +820,7 @@ fun OnboardingScreen(
                                 onValueChange = { weightText = it },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = NewMePrimary,
                                     unfocusedBorderColor = NewMeBorder,
@@ -759,7 +839,7 @@ fun OnboardingScreen(
                                 color = NewMePrimary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
+                                letterSpacing = 0.sp
                             )
                             Text(
                                 "Do not worry if you don't know these yet. You can add them anytime in Progress.",
@@ -768,63 +848,10 @@ fun OnboardingScreen(
                             )
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            // Body fat %
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Body fat %", color = NewMeTextSecondary, fontSize = 13.sp)
-                                if (knowsBodyFat) {
-                                    OutlinedTextField(
-                                        value = bodyFatText,
-                                        onValueChange = { bodyFatText = it },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        singleLine = true,
-                                        modifier = Modifier.width(90.dp).height(48.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = NewMePrimary,
-                                            unfocusedBorderColor = NewMeBorder,
-                                            focusedContainerColor = NewMeSurface,
-                                            unfocusedContainerColor = NewMeSurface
-                                        ),
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                } else {
-                                    TextButton(onClick = { knowsBodyFat = true }) {
-                                        Text("I know this", color = NewMePrimary, fontSize = 12.sp)
-                                    }
-                                }
-                            }
-
-                            // Waist cm
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Waist circumference (cm)", color = NewMeTextSecondary, fontSize = 13.sp)
-                                if (knowsWaist) {
-                                    OutlinedTextField(
-                                        value = waistText,
-                                        onValueChange = { waistText = it },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                        singleLine = true,
-                                        modifier = Modifier.width(90.dp).height(48.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = NewMePrimary,
-                                            unfocusedBorderColor = NewMeBorder,
-                                            focusedContainerColor = NewMeSurface,
-                                            unfocusedContainerColor = NewMeSurface
-                                        ),
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                } else {
-                                    TextButton(onClick = { knowsWaist = true }) {
-                                        Text("I know this", color = NewMePrimary, fontSize = 12.sp)
-                                    }
-                                }
-                            }
+                            OptionalMetricField("Body fat (%)", knowsBodyFat, { knowsBodyFat = it }, bodyFatText, { bodyFatText = it })
+                            OptionalMetricField("Skeletal muscle (kg)", knowsMuscle, { knowsMuscle = it }, muscleText, { muscleText = it })
+                            OptionalMetricField("Waist (cm)", knowsWaist, { knowsWaist = it }, waistText, { waistText = it })
+                            OptionalMetricField("Measurement score (0-100)", knowsInBody, { knowsInBody = it }, inBodyText, { inBodyText = it })
                         }
                     }
 
@@ -852,7 +879,7 @@ fun OnboardingScreen(
                                     val isSelected = selectedProgressGoal == goalTitle
                                     Surface(
                                         color = if (isSelected) NewMePrimary.copy(alpha = 0.12f) else NewMeSurface,
-                                        shape = RoundedCornerShape(14.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         border = BorderStroke(
                                             1.dp,
                                             if (isSelected) NewMePrimary else NewMeBorder
@@ -900,7 +927,7 @@ fun OnboardingScreen(
                                         placeholder = { Text("Target weight in kg (e.g. 68.0)", color = NewMeTextMuted) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
-                                        shape = RoundedCornerShape(12.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = NewMePrimary,
                                             unfocusedBorderColor = NewMeBorder,
@@ -936,7 +963,7 @@ fun OnboardingScreen(
                             // Wake time
                             Text("Wake time", color = NewMePrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 wakeTimeOptions.forEach { t ->
                                     FilterChip(
                                         selected = selectedWakeTime == t,
@@ -955,7 +982,7 @@ fun OnboardingScreen(
                             // Sleep time
                             Text("Typical sleep time", color = NewMePrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 sleepTimeOptions.forEach { t ->
                                     FilterChip(
                                         selected = selectedSleepTime == t,
@@ -974,7 +1001,7 @@ fun OnboardingScreen(
                             // Work
                             Text("Work environment", color = NewMePrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 workOptions.forEach { w ->
                                     FilterChip(
                                         selected = selectedWork == w,
@@ -993,7 +1020,7 @@ fun OnboardingScreen(
                             // Training frequency
                             Text("Training frequency target", color = NewMePrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 trainFreqOptions.forEach { f ->
                                     FilterChip(
                                         selected = selectedTrainFreq == f,
@@ -1012,7 +1039,7 @@ fun OnboardingScreen(
                             // Most difficult time of day
                             Text("Most difficult time of day to stay disciplined", color = NewMePrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 difficultTimeOptions.forEach { d ->
                                     FilterChip(
                                         selected = selectedDifficultTime == d,
@@ -1025,6 +1052,29 @@ fun OnboardingScreen(
                                     )
                                 }
                             }
+                            Spacer(Modifier.height(20.dp))
+                            Text("Activities (optional)", color = NewMePrimary, fontWeight = FontWeight.Bold)
+                            ActivityKind.entries.filter { it != ActivityKind.NONE }.forEach { activity ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(checked = activity.name in selectedActivities, onCheckedChange = { checked ->
+                                        selectedActivities = if (checked) selectedActivities + activity.name else selectedActivities - activity.name
+                                    })
+                                    Text(activity.label, color = NewMeTextPrimary, modifier = Modifier.weight(1f))
+                                }
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Text("Your Daily Streak Goal", color = NewMePrimary, fontWeight = FontWeight.Bold)
+                            DailyGoalKind.entries.forEach { goal ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(selected = streakGoal == goal.name, onClick = {
+                                        streakGoal = goal.name
+                                        streakTargetText = if (goal == DailyGoalKind.TASKS) "3" else "20"
+                                    })
+                                    Text(goal.label, color = NewMeTextPrimary, modifier = Modifier.weight(1f))
+                                }
+                            }
+                            OutlinedTextField(streakTargetText, { streakTargetText = it }, label = { Text("Daily target") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth(), singleLine = true)
                         }
                     }
 
@@ -1046,6 +1096,15 @@ fun OnboardingScreen(
                                 fontSize = 13.sp
                             )
                             Spacer(modifier = Modifier.height(18.dp))
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = mealSuggestionChoice, onCheckedChange = { mealSuggestionChoice = it })
+                                Text("Include meal suggestions", color = NewMeTextPrimary, modifier = Modifier.weight(1f))
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = supplementChoice, onCheckedChange = { supplementChoice = it })
+                                Text("I track my own supplements", color = NewMeTextPrimary, modifier = Modifier.weight(1f))
+                            }
 
                             // Diet
                             Text("Dietary Preference", color = NewMePrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -1106,7 +1165,7 @@ fun OnboardingScreen(
                                     val isSel = selectedCooking == c
                                     Surface(
                                         color = if (isSel) NewMePrimary.copy(alpha = 0.12f) else NewMeSurface,
-                                        shape = RoundedCornerShape(10.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         border = BorderStroke(1.dp, if (isSel) NewMePrimary else NewMeBorder),
                                         modifier = Modifier.fillMaxWidth().clickable { selectedCooking = c }
                                     ) {
@@ -1166,7 +1225,7 @@ fun OnboardingScreen(
                                     val isSelected = selectedTone == key
                                     Surface(
                                         color = if (isSelected) NewMePrimary.copy(alpha = 0.15f) else NewMeSurface,
-                                        shape = RoundedCornerShape(16.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         border = BorderStroke(
                                             1.dp,
                                             if (isSelected) NewMePrimary else NewMeBorder
@@ -1234,7 +1293,7 @@ fun OnboardingScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Surface(
                                     color = if (voiceChoice) NewMePrimary.copy(alpha = 0.15f) else NewMeSurface,
-                                    shape = RoundedCornerShape(16.dp),
+                                    shape = RoundedCornerShape(8.dp),
                                     border = BorderStroke(1.dp, if (voiceChoice) NewMePrimary else NewMeBorder),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1268,7 +1327,7 @@ fun OnboardingScreen(
 
                                 Surface(
                                     color = if (!voiceChoice) NewMePrimary.copy(alpha = 0.15f) else NewMeSurface,
-                                    shape = RoundedCornerShape(16.dp),
+                                    shape = RoundedCornerShape(8.dp),
                                     border = BorderStroke(1.dp, if (!voiceChoice) NewMePrimary else NewMeBorder),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1318,7 +1377,7 @@ fun OnboardingScreen(
 
                             Surface(
                                 color = NewMeSurface,
-                                shape = RoundedCornerShape(20.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 border = BorderStroke(1.dp, NewMeBorder),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -1346,19 +1405,20 @@ fun OnboardingScreen(
 
                             Button(
                                 onClick = { saveAndLaunch() },
+                                enabled = !saving,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(56.dp)
+                                    .heightIn(min = 56.dp)
                                     .testTag("start_newme_journey_button"),
                                 colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                                shape = RoundedCornerShape(16.dp)
+                                shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
-                                    "I UNDERSTAND — START MY NEWME JOURNEY",
+                                    if (saving) "Saving..." else "Save & Start NewMe",
                                     color = NewMePrimaryDark,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Black,
-                                    letterSpacing = 1.sp
+                                    letterSpacing = 0.sp
                                 )
                             }
                         }
@@ -1376,13 +1436,14 @@ fun OnboardingScreen(
                         .padding(horizontal = 20.dp, vertical = 16.dp)
                 ) {
                     Button(
-                        onClick = { step++ },
+                        onClick = { continueStep() },
+                        enabled = !saving,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(52.dp)
+                            .heightIn(min = 52.dp)
                             .testTag("onboarding_continue_button"),
                         colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                        shape = RoundedCornerShape(14.dp)
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -1403,5 +1464,18 @@ fun OnboardingScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OptionalMetricField(label: String, enabled: Boolean, onEnabled: (Boolean) -> Unit, value: String, onValue: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = enabled, onCheckedChange = onEnabled)
+            Text(label, color = NewMeTextSecondary, modifier = Modifier.weight(1f))
+        }
+        if (enabled) OutlinedTextField(value, onValue, label = { Text(label) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true,
+            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp))
     }
 }

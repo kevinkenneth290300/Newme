@@ -4,12 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.local.dao.*
 import com.example.data.local.entity.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 @Database(
     entities = [
@@ -33,10 +29,19 @@ import kotlinx.coroutines.launch
         EnvironmentTaskEntity::class,
         DailyCheckinEntity::class,
         ReflectionHistoryEntity::class,
-        FriendConnectionEntity::class
+        FriendConnectionEntity::class,
+        AppSettingsEntity::class,
+        DailyStateEntity::class,
+        RewardEventEntity::class,
+        LegacyRewardExclusionEntity::class,
+        CycleEntryEntity::class,
+        ActivityTrackEntity::class,
+        ActiveTrackingEntity::class,
+        TrackingDayTotalEntity::class,
+        RoutePointEntity::class
     ],
-    version = 4,
-    exportSchema = false
+    version = 5,
+    exportSchema = true
 )
 abstract class NewMeDatabase : RoomDatabase() {
     abstract fun userProfileDao(): UserProfileDao
@@ -56,6 +61,11 @@ abstract class NewMeDatabase : RoomDatabase() {
     abstract fun dailyCheckinDao(): DailyCheckinDao
     abstract fun reflectionHistoryDao(): ReflectionHistoryDao
     abstract fun friendConnectionDao(): FriendConnectionDao
+    abstract fun settingsDao(): SettingsDao
+    abstract fun dailyStateDao(): DailyStateDao
+    abstract fun rewardDao(): RewardDao
+    abstract fun cycleDao(): CycleDao
+    abstract fun activityTrackingDao(): ActivityTrackingDao
 
     companion object {
         @Volatile
@@ -68,83 +78,14 @@ abstract class NewMeDatabase : RoomDatabase() {
                     NewMeDatabase::class.java,
                     "newme_master.db"
                 )
-                    .fallbackToDestructiveMigration()
-                    .addCallback(DatabaseCallback())
+                    .addMigrations(DatabaseMigrations.MIGRATION_4_5)
                     .build()
                 INSTANCE = instance
                 instance
             }
         }
 
-        private class DatabaseCallback : Callback() {
-            override fun onCreate(db: SupportSQLiteDatabase) {
-                super.onCreate(db)
-                // Seed initial default data in background
-                CoroutineScope(Dispatchers.IO).launch {
-                    INSTANCE?.let { database ->
-                        seedInitialData(database)
-                    }
-                }
-            }
-        }
-
         suspend fun seedInitialData(database: NewMeDatabase) {
-            if (database.userProfileDao().getUserProfileDirect() != null) {
-                return
-            }
-
-            // 1. Clean Brand New User Profile State (Zero fake history, Day 1, 0 XP, 0 Streak)
-            database.userProfileDao().insertOrUpdateProfile(
-                UserProfileEntity(
-                    id = 1,
-                    name = "",
-                    age = 25,
-                    sex = "Male",
-                    heightCm = 170f,
-                    initialWeightKg = 70.0f,
-                    currentWeightKg = 70.0f,
-                    targetWeightKg = null,
-                    bodyFatPercent = null,
-                    skeletalMuscleKg = null,
-                    waistCm = null,
-                    primaryActivityType = "Gym / Strength Training",
-                    primaryGoal = "Discipline/self-growth",
-                    bmr = 1600,
-                    tdee = 2200,
-                    calorieTarget = 2000,
-                    proteinTargetGrams = 90,
-                    carbsTargetGrams = 200,
-                    fatTargetGrams = 60,
-                    waterTargetLiters = 2.5f,
-                    sleepTargetHours = 7.5f,
-                    weeklyWorkoutsTarget = 3,
-                    goalDescription = "",
-                    selectedGoals = "",
-                    selectedActivities = "",
-                    activityFrequencies = "",
-                    trackingLevel = "Focused",
-                    dietaryPreference = "Vegetarian",
-                    usesSupplements = false,
-                    usesRecommendedPlan = false,
-                    usesHealthConnect = false,
-                    voiceEnabled = false,
-                    speakMorning = true,
-                    speakMidday = false,
-                    speakEvening = true,
-                    startDate = "",
-                    isOnboarded = false,
-                    currentLevel = 1,
-                    currentXp = 0,
-                    currentStreak = 0,
-                    longestStreak = 0,
-                    perfectDays = 0,
-                    recoveryDays = 0,
-                    isRecoveryActive = false,
-                    currentMomentum = 0
-                )
-            )
-
-            // 2. Achievements initialized at ZERO - none unlocked
             val initialAchievements = listOf(
                 AchievementEntity("first_step", "FIRST STEP", "Complete your first NewMe action", "ic_flag", isUnlocked = false, unlockedDate = null),
                 AchievementEntity("first_day", "FIRST DAY", "Complete your first day", "ic_flag", isUnlocked = false, unlockedDate = null),

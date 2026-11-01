@@ -37,7 +37,7 @@ fun EnvironmentMaintenanceSection(
 
     Surface(
         color = NewMeSurface,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, NewMeBorder),
         modifier = modifier
             .fillMaxWidth()
@@ -61,7 +61,7 @@ fun EnvironmentMaintenanceSection(
                             color = NewMePrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
+                            letterSpacing = 0.sp
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
@@ -136,7 +136,7 @@ private fun EnvironmentTaskRow(
 ) {
     Surface(
         color = if (task.isCompleted) NewMeSurfaceDarker else NewMeSurfaceElevated,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, if (task.isCompleted) NewMeBorder.copy(alpha = 0.5f) else NewMeBorder),
         modifier = Modifier
             .fillMaxWidth()
@@ -228,7 +228,7 @@ private fun AddEnvironmentTaskDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurface,
             border = BorderStroke(1.dp, NewMeBorder),
             modifier = Modifier.fillMaxWidth().padding(16.dp)
@@ -239,7 +239,7 @@ private fun AddEnvironmentTaskDialog(
                     color = NewMePrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
+                    letterSpacing = 0.sp
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -322,7 +322,7 @@ private fun AddEnvironmentTaskDialog(
                         }
                     },
                     enabled = title.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth().height(42.dp).testTag("confirm_add_env_task"),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp).testTag("confirm_add_env_task"),
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
                     shape = RoundedCornerShape(8.dp)
                 ) {

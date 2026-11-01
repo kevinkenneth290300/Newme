@@ -1,7 +1,5 @@
 package com.example.ui.screens.splash
-
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
+import com.example.ui.components.NewMeIllustration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -27,32 +25,12 @@ import kotlinx.coroutines.delay
 fun SplashScreen(
     userProfile: UserProfileEntity?,
     onNavigateToOnboarding: () -> Unit,
-    onNavigateToToday: () -> Unit
+    onNavigateToToday: () -> Unit,
+    isLoading: Boolean = false
 ) {
-    // Pulse animation for the emblem
-    val infiniteTransition = rememberInfiniteTransition(label = "splash_pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.94f,
-        targetValue = 1.06f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse_scale"
-    )
-
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 0.8f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glow_alpha"
-    )
-
     // Automatically transition after a brief branded moment
-    LaunchedEffect(userProfile) {
+    LaunchedEffect(userProfile, isLoading) {
+        if (isLoading) return@LaunchedEffect
         delay(1200)
         if (userProfile == null || !userProfile.isOnboarded) {
             onNavigateToOnboarding()
@@ -65,13 +43,7 @@ fun SplashScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        NewMeBackground,
-                        NewMeSurfaceVariant,
-                        NewMeBackground
-                    )
-                )
+                NewMeBackground
             )
             .padding(24.dp)
             .testTag("splash_screen"),
@@ -81,40 +53,7 @@ fun SplashScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Glowing Emblem
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(110.dp)
-                    .scale(pulseScale)
-            ) {
-                // Outer Glow ring
-                Surface(
-                    shape = CircleShape,
-                    color = NewMePrimary.copy(alpha = glowAlpha * 0.2f),
-                    modifier = Modifier.fillMaxSize()
-                ) {}
-
-                // Inner Container
-                Surface(
-                    shape = RoundedCornerShape(26.dp),
-                    color = NewMeSurface,
-                    border = BorderStroke(1.5.dp, NewMePrimary),
-                    modifier = Modifier.size(84.dp)
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Bolt,
-                            contentDescription = "NewMe Bolt",
-                            tint = NewMePrimary,
-                            modifier = Modifier.size(44.dp)
-                        )
-                    }
-                }
-            }
+            NewMeIllustration(size = 144.dp)
 
             Spacer(modifier = Modifier.height(28.dp))
 
@@ -124,7 +63,7 @@ fun SplashScreen(
                 color = NewMePrimary,
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Black,
-                letterSpacing = 2.sp
+                letterSpacing = 0.sp
             )
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -135,10 +74,10 @@ fun SplashScreen(
                 color = NewMeTextMuted,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp
+                letterSpacing = 0.sp
             )
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.heightIn(min = 48.dp))
 
             // Subtle loading indicator
             LinearProgressIndicator(
@@ -157,12 +96,13 @@ fun SplashScreen(
                 color = NewMeTextMuted,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.SemiBold,
-                letterSpacing = 1.sp
+                letterSpacing = 0.sp
             )
         }
 
         // Fast tap to proceed button at bottom
         Button(
+            enabled = !isLoading,
             onClick = {
                 if (userProfile == null || !userProfile.isOnboarded) {
                     onNavigateToOnboarding()
@@ -174,18 +114,17 @@ fun SplashScreen(
                 containerColor = NewMeSurfaceVariant,
                 contentColor = NewMeTextSecondary
             ),
-            border = BorderStroke(1.dp, NewMeBorder),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(8.dp),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 24.dp)
                 .testTag("splash_continue_button")
         ) {
             Text(
-                text = "ENTER SYSTEM →",
+                text = "Continue",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
+                letterSpacing = 0.sp
             )
         }
     }

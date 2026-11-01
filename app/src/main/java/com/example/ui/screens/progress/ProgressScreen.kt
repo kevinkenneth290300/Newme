@@ -13,6 +13,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +28,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.entity.BodyMeasurementEntity
+import com.example.data.repository.MeasurementTrends
+import com.example.data.local.entity.UserProfileEntity
+import com.example.util.NutritionCalculator
+import com.example.ui.components.NewMeIllustration
 import com.example.ui.theme.*
 import com.example.viewmodel.NewMeViewModel
 import java.time.LocalDate
@@ -34,27 +41,20 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
     val measurements by viewModel.bodyMeasurements.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val achievements by viewModel.achievements.collectAsStateWithLifecycle()
+    val achievementProgress by viewModel.achievementProgress.collectAsStateWithLifecycle()
 
     var showAddCheckInDialog by remember { mutableStateOf(false) }
 
-    val latest = measurements.maxByOrNull { it.date }
-    val earliest = measurements.minByOrNull { it.date }
-
-    val currentWeight = latest?.weightKg ?: userProfile?.currentWeightKg ?: 0f
-    val initialWeight = earliest?.weightKg ?: userProfile?.initialWeightKg ?: currentWeight
-    val weightDiff = if (initialWeight > 0f && currentWeight > 0f) currentWeight - initialWeight else 0f
-
-    val currentFat = latest?.bodyFatPercent ?: userProfile?.bodyFatPercent ?: 0f
-    val initialFat = earliest?.bodyFatPercent ?: userProfile?.bodyFatPercent ?: currentFat
-    val fatDiff = if (initialFat > 0f && currentFat > 0f) currentFat - initialFat else 0f
-
-    val currentMuscle = latest?.skeletalMuscleKg ?: userProfile?.skeletalMuscleKg ?: 0f
-    val initialMuscle = earliest?.skeletalMuscleKg ?: userProfile?.skeletalMuscleKg ?: currentMuscle
-    val muscleDiff = if (initialMuscle > 0f && currentMuscle > 0f) currentMuscle - initialMuscle else 0f
-
-    val currentWaist = latest?.waistCm ?: 0f
-    val initialWaist = earliest?.waistCm ?: currentWaist
-    val waistDiff = if (initialWaist > 0f && currentWaist > 0f) currentWaist - initialWaist else 0f
+    val latest = measurements.sortedWith(compareByDescending<BodyMeasurementEntity> { it.date }.thenByDescending { it.id }).firstOrNull()
+    val trends = MeasurementTrends.from(measurements)
+    val currentWeight = trends.weight.current ?: 0f
+    val weightDiff = trends.weight.change ?: 0f
+    val currentFat = trends.bodyFat.current ?: 0f
+    val fatDiff = trends.bodyFat.change ?: 0f
+    val currentMuscle = trends.muscle.current ?: 0f
+    val muscleDiff = trends.muscle.change ?: 0f
+    val currentWaist = trends.waist.current ?: 0f
+    val waistDiff = trends.waist.change ?: 0f
 
     LazyColumn(
         modifier = Modifier
@@ -72,14 +72,14 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("BODY TRANSFORMATION", color = NewMePrimary, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                    Text("Track trends, not daily noise. Muscle retained, fat lost.", color = NewMeTextSecondary, fontSize = 12.sp)
+                    Text("RECORDED PROGRESS", color = NewMePrimary, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 0.sp)
+                    Text("Measurements and daily consistency", color = NewMeTextSecondary, fontSize = 12.sp)
                 }
 
                 Button(
                     onClick = { showAddCheckInDialog = true },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     modifier = Modifier.testTag("add_checkin_button")
                 ) {
@@ -93,8 +93,8 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
         // Recomposition Verdict Card
         item {
             Surface(
-                color = Color(0xFF0D1C17),
-                shape = RoundedCornerShape(16.dp),
+                color = NewMeSurfaceVariant,
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeTertiary.copy(alpha = 0.5f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -108,21 +108,18 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            "TRUE BODY RECOMPOSITION",
+                            "MEASUREMENT HISTORY",
                             color = NewMeTertiary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
+                            letterSpacing = 0.sp
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            if (measurements.isNotEmpty()) {
-                                "Muscle gained (%+.1f kg) while fat changed (%+.1f%%). Scale weight alone is deceptive.".format(
-                                    muscleDiff,
-                                    fatDiff
-                                )
+                            if (trends.muscle.change != null && trends.bodyFat.change != null) {
+                                "Recorded muscle change: %+.1f kg. Recorded body-fat change: %+.1f percentage points.".format(muscleDiff, fatDiff)
                             } else {
-                                "Log your initial body check-in to start tracking true body recomposition and trend analytics."
+                                "Insufficient comparison data. Each trend needs that measurement on at least two different dates."
                             },
                             color = NewMeTextPrimary,
                             fontSize = 13.sp,
@@ -140,14 +137,14 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
                     MetricTile(
                         label = "CURRENT WEIGHT",
                         value = if (currentWeight > 0f) "%.1f kg".format(currentWeight) else "—",
-                        change = if (measurements.size > 1) "%+.1f kg net".format(weightDiff) else "Baseline",
+                        change = trends.weight.change?.let { "%+.1f kg change".format(it) } ?: "Insufficient data",
                         isPositiveOutcome = weightDiff <= 0,
                         modifier = Modifier.weight(1f)
                     )
                     MetricTile(
                         label = "BODY FAT",
                         value = if (currentFat > 0f) "%.1f %%".format(currentFat) else "—",
-                        change = if (measurements.size > 1) "%+.1f %% net".format(fatDiff) else "Baseline",
+                        change = trends.bodyFat.change?.let { "%+.1f pp change".format(it) } ?: "Insufficient data",
                         isPositiveOutcome = fatDiff <= 0,
                         modifier = Modifier.weight(1f)
                     )
@@ -156,14 +153,14 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
                     MetricTile(
                         label = "SKELETAL MUSCLE",
                         value = if (currentMuscle > 0f) "%.1f kg".format(currentMuscle) else "—",
-                        change = if (measurements.size > 1) "%+.1f kg muscle".format(muscleDiff) else "Baseline",
+                        change = trends.muscle.change?.let { "%+.1f kg change".format(it) } ?: "Insufficient data",
                         isPositiveOutcome = muscleDiff >= 0,
                         modifier = Modifier.weight(1f)
                     )
                     MetricTile(
                         label = "WAIST MEASUREMENT",
                         value = if (currentWaist > 0f) "%.1f cm".format(currentWaist) else "—",
-                        change = if (measurements.size > 1) "%+.1f cm reduction".format(waistDiff) else "Baseline",
+                        change = trends.waist.change?.let { "%+.1f cm change".format(it) } ?: "Insufficient data",
                         isPositiveOutcome = waistDiff <= 0,
                         modifier = Modifier.weight(1f)
                     )
@@ -175,7 +172,7 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -189,9 +186,9 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
                     MiniIndicator(label = "Visceral Fat", value = if (latest?.visceralFat != null) "Level ${latest.visceralFat.toInt()}" else "—", color = NewMeSecondary)
                     VerticalDivider(modifier = Modifier.height(30.dp), color = NewMeBorder)
                     val displayBmr = latest?.bmr ?: userProfile?.bmr ?: 0
-                    MiniIndicator(label = "BMR", value = if (displayBmr > 0) "$displayBmr kcal" else "—", color = NewMeTertiary)
+                    MiniIndicator(label = "BMR estimate", value = if (displayBmr > 0) "$displayBmr kcal" else "—", color = NewMeTertiary)
                     VerticalDivider(modifier = Modifier.height(30.dp), color = NewMeBorder)
-                    MiniIndicator(label = "BMI", value = if (latest?.bmi != null) "%.1f".format(latest.bmi) else "—", color = Color(0xFF818CF8))
+                    MiniIndicator(label = "BMI", value = if (latest?.bmi != null) "%.1f".format(latest.bmi) else "—", color = NewMeSecondary)
                 }
             }
         }
@@ -200,7 +197,7 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -211,8 +208,8 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         StatPill("CURRENT STREAK", "${userProfile?.currentStreak ?: 0} Days", NewMePrimary)
                         StatPill("LONGEST STREAK", "${userProfile?.longestStreak ?: 0} Days", NewMeSecondary)
-                        StatPill("PERFECT DAYS", "${userProfile?.perfectDays ?: 0}", NewMeTertiary)
-                        StatPill("RECOVERY DAYS", "${userProfile?.recoveryDays ?: 0}", Color(0xFF818CF8))
+                        StatPill("GOAL DAYS", "${userProfile?.perfectDays ?: 0}", NewMeTertiary)
+                        StatPill("RECOVERY DAYS", "${userProfile?.recoveryDays ?: 0}", NewMeSecondary)
                     }
                 }
             }
@@ -234,9 +231,10 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
 
         if (measurements.isEmpty()) {
             item {
+                NewMeIllustration(size = 96.dp)
                 Surface(
                     color = NewMeSurfaceVariant,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(8.dp),
                     border = BorderStroke(1.dp, NewMeBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -265,7 +263,9 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
         items(achievements.chunked(2)) { pair ->
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 pair.forEach { ach ->
-                    AchievementCard(achievement = ach, modifier = Modifier.weight(1f))
+                    AchievementCard(achievement = ach, modifier = Modifier.weight(1f),
+                        progress = achievementProgress.firstOrNull { it.achievement.id == ach.id }?.current ?: 0,
+                        target = achievementProgress.firstOrNull { it.achievement.id == ach.id }?.target ?: 1)
                 }
                 if (pair.size == 1) {
                     Spacer(modifier = Modifier.weight(1f))
@@ -275,12 +275,12 @@ fun ProgressScreen(viewModel: NewMeViewModel) {
     }
 
     // Add Check-In Dialog
-    if (showAddCheckInDialog) {
+    if (showAddCheckInDialog && userProfile != null) {
         AddCheckInDialog(
             latest = latest,
+            profile = userProfile!!,
             onSave = { measurement ->
-                viewModel.saveMeasurement(measurement)
-                showAddCheckInDialog = false
+                viewModel.saveMeasurement(measurement) { showAddCheckInDialog = false }
             },
             onDismiss = { showAddCheckInDialog = false }
         )
@@ -297,7 +297,7 @@ private fun MetricTile(
 ) {
     Surface(
         color = NewMeSurface,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, NewMeBorder),
         modifier = modifier
     ) {
@@ -341,7 +341,7 @@ private fun CheckInCard(
 ) {
     Surface(
         color = NewMeSurface,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, NewMeBorder),
         modifier = Modifier.fillMaxWidth().testTag("checkin_item_${checkIn.date}")
     ) {
@@ -377,7 +377,7 @@ private fun CheckInCard(
                 checkIn.waistCm?.let { waist ->
                     Column {
                         Text("Waist", color = NewMeTextMuted, fontSize = 10.sp)
-                        Text("%.1f cm".format(waist), color = Color(0xFFFBBF24), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("%.1f cm".format(waist), color = NewMeTertiary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -392,11 +392,13 @@ private fun CheckInCard(
 @Composable
 private fun AchievementCard(
     achievement: com.example.data.local.entity.AchievementEntity,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    progress: Int = 0,
+    target: Int = 1
 ) {
     Surface(
-        color = if (achievement.isUnlocked) Color(0xFF19202E) else NewMeSurface,
-        shape = RoundedCornerShape(12.dp),
+        color = if (achievement.isUnlocked) NewMeSurfaceElevated else NewMeSurface,
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(
             1.dp,
             if (achievement.isUnlocked) NewMePrimary.copy(alpha = 0.5f) else NewMeBorder
@@ -419,7 +421,7 @@ private fun AchievementCard(
                         color = NewMePrimary,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.sp
                     )
                 }
             }
@@ -437,6 +439,9 @@ private fun AchievementCard(
                 fontSize = 10.sp,
                 lineHeight = 14.sp
             )
+            Spacer(Modifier.height(8.dp))
+            Text("${if (achievement.isUnlocked) target else progress} / $target", style = MaterialTheme.typography.labelSmall, color = NewMeTextSecondary)
+            LinearProgressIndicator(progress = { if (achievement.isUnlocked) 1f else (progress.toFloat() / target.coerceAtLeast(1)).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -444,24 +449,28 @@ private fun AchievementCard(
 @Composable
 private fun AddCheckInDialog(
     latest: BodyMeasurementEntity?,
+    profile: UserProfileEntity,
     onSave: (BodyMeasurementEntity) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var date by remember { mutableStateOf(LocalDate.now().toString()) }
-    var weight by remember { mutableStateOf(latest?.weightKg?.toString() ?: "70.5") }
-    var fat by remember { mutableStateOf(latest?.bodyFatPercent?.toString() ?: "35.0") }
-    var muscle by remember { mutableStateOf(latest?.skeletalMuscleKg?.toString() ?: "25.8") }
-    var waist by remember { mutableStateOf(latest?.waistCm?.toString() ?: "84.5") }
-    var inBodyScore by remember { mutableStateOf(latest?.inBodyScore?.toString() ?: "74") }
-    var notes by remember { mutableStateOf("") }
+    var date by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    var weight by rememberSaveable { mutableStateOf("") }
+    var fat by rememberSaveable { mutableStateOf("") }
+    var muscle by rememberSaveable { mutableStateOf("") }
+    var waist by rememberSaveable { mutableStateOf("") }
+    var inBodyScore by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    fun optional(value: String, label: String): Float? = if (value.isBlank()) null
+        else value.toFloatOrNull() ?: throw IllegalArgumentException("Enter a valid $label or leave it blank.")
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
+            Column(modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
                 Text("Log Body Check-In", color = NewMeTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -530,28 +539,35 @@ private fun AddCheckInDialog(
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
                     onClick = {
-                        val w = weight.toFloatOrNull() ?: 70.0f
-                        val f = fat.toFloatOrNull()
-                        val m = muscle.toFloatOrNull()
-                        val waistVal = waist.toFloatOrNull()
-                        val score = inBodyScore.toIntOrNull() ?: 70
+                        try {
+                        val parsedDate = LocalDate.parse(date)
+                        require(!parsedDate.isAfter(LocalDate.now()) && parsedDate.year >= 1900) { "Choose a date no later than today." }
+                        val parsedWeight = weight.toFloatOrNull() ?: throw IllegalArgumentException("Enter your measured weight.")
+                        val bodyFat = optional(fat, "body-fat measurement")
+                        val skeletalMuscle = optional(muscle, "muscle measurement")
+                        val waistValue = optional(waist, "waist measurement")
+                        val score = if (inBodyScore.isBlank()) null else inBodyScore.toIntOrNull() ?: throw IllegalArgumentException("Enter a valid optional score.")
+                        NutritionCalculator.validateMetrics(profile.age, profile.heightCm, parsedWeight, bodyFatPercent = bodyFat,
+                            skeletalMuscleKg = skeletalMuscle, waistCm = waistValue, inBodyScore = score)
                         onSave(
                             BodyMeasurementEntity(
                                 date = date,
-                                weightKg = w,
-                                bodyFatPercent = f,
-                                skeletalMuscleKg = m,
-                                waistCm = waistVal,
+                                weightKg = parsedWeight,
+                                bodyFatPercent = bodyFat,
+                                skeletalMuscleKg = skeletalMuscle,
+                                waistCm = waistValue,
                                 inBodyScore = score,
                                 notes = notes
                             )
                         )
+                        } catch (failure: Exception) { error = "Enter a valid date and measurement values. ${failure.message.orEmpty()}" }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 ) {
-                    Text("SAVE CHECK-IN", color = Color(0xFF1A0E00), fontWeight = FontWeight.Bold)
+                    Text("SAVE CHECK-IN", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                 }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         }
     }

@@ -30,10 +30,12 @@ fun CircularDisciplineRing(
     strokeWidth: Dp = 5.dp,
     onClick: () -> Unit = {}
 ) {
-    val progress = (score.toFloat() / maxScore).coerceIn(0f, 1f)
+    val progress = (score.toFloat() / maxScore.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val trackColor = NewMeSurfaceDarker
+    val progressColor = NewMePrimary
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
-        animationSpec = tween(durationMillis = 800),
+        animationSpec = tween(durationMillis = if (LocalReducedMotion.current) 0 else 800),
         label = "disciplineRing"
     )
 
@@ -47,7 +49,7 @@ fun CircularDisciplineRing(
         Canvas(modifier = Modifier.fillMaxSize().padding(strokeWidth / 2)) {
             // Background track
             drawArc(
-                color = NewMeSurfaceDarker,
+                color = trackColor,
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -58,7 +60,7 @@ fun CircularDisciplineRing(
             val sweep = animatedProgress * 360f
             if (sweep > 0f) {
                 drawArc(
-                    color = NewMePrimary,
+                    color = progressColor,
                     startAngle = -90f,
                     sweepAngle = sweep,
                     useCenter = false,
@@ -83,7 +85,7 @@ fun CircularDisciplineRing(
                 color = NewMeTextMuted,
                 fontSize = if (size < 120.dp) 8.sp else 10.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp
+                letterSpacing = 0.sp
             )
         }
     }

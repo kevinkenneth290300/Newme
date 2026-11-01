@@ -26,7 +26,7 @@ fun DisciplineBreakdownDialog(
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             tonalElevation = 8.dp,
             modifier = Modifier
@@ -46,13 +46,13 @@ fun DisciplineBreakdownDialog(
                 ) {
                     Column {
                         Text(
-                            text = "Today's Score",
+                            text = "Recorded Score",
                             color = NewMeTextPrimary,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "${breakdown.totalScore} / 100",
+                            text = if (breakdown.hasTargetHistory) "${breakdown.totalScore} / 100" else "Partial history",
                             color = NewMePrimary,
                             fontSize = 28.sp,
                             fontWeight = FontWeight.Black
@@ -74,16 +74,16 @@ fun DisciplineBreakdownDialog(
                 ScoreRow(name = "Protein Target", score = breakdown.proteinScore, max = breakdown.proteinMax, color = NewMePrimary)
                 ScoreRow(name = "Workout & Training", score = breakdown.workoutScore, max = breakdown.workoutMax, color = NewMePurple)
                 ScoreRow(name = "Water Intake", score = breakdown.waterScore, max = breakdown.waterMax, color = NewMeSecondary)
-                ScoreRow(name = "Sleep & Recovery", score = breakdown.sleepScore, max = breakdown.sleepMax, color = Color(0xFF818CF8))
-                ScoreRow(name = "Supplements", score = breakdown.supplementScore, max = breakdown.supplementMax, color = Color(0xFFFBBF24))
-                ScoreRow(name = "Meal Prep Inventory", score = breakdown.mealPrepScore, max = breakdown.mealPrepMax, color = Color(0xFF34D399))
-                ScoreRow(name = "Daily Checklist Habits", score = breakdown.habitScore, max = breakdown.habitMax, color = Color(0xFF38BDF8))
+                ScoreRow(name = "Sleep & Recovery", score = breakdown.sleepScore, max = breakdown.sleepMax, color = NewMeSecondary)
+                ScoreRow(name = "Supplements", score = breakdown.supplementScore, max = breakdown.supplementMax, color = NewMeTertiary)
+                ScoreRow(name = "Meal Prep Inventory", score = breakdown.mealPrepScore, max = breakdown.mealPrepMax, color = NewMePrimary)
+                ScoreRow(name = "Daily Checklist Habits", score = breakdown.habitScore, max = breakdown.habitMax, color = NewMeSecondary)
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(NewMeSurfaceElevated)
                         .padding(12.dp)
                 ) {
@@ -99,13 +99,13 @@ fun DisciplineBreakdownDialog(
                 Button(
                     onClick = onDismiss,
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("breakdown_got_it_button")
                 ) {
-                    Text("GOT IT", color = Color(0xFF1A0E00), fontWeight = FontWeight.Bold)
+                    Text("GOT IT", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -119,6 +119,7 @@ private fun ScoreRow(
     max: Int,
     color: Color
 ) {
+    if (max <= 0) return
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),

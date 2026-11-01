@@ -24,6 +24,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.entity.UserProfileEntity
+import com.example.ui.components.BackupControls
+import com.example.ui.components.GoalSettings
+import com.example.ui.components.AppearanceSettings
+import com.example.ui.components.CycleControls
 import com.example.ui.theme.*
 import com.example.viewmodel.NewMeViewModel
 
@@ -51,7 +55,7 @@ fun SystemScreen(
         // Header
         item {
             Column {
-                Text("SYSTEM & DISCIPLINE", color = NewMePrimary, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Text("SYSTEM & DISCIPLINE", color = NewMePrimary, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 0.sp)
                 Text("Rules create freedom. Calibrate targets and operating principles.", color = NewMeTextSecondary, fontSize = 12.sp)
             }
         }
@@ -60,7 +64,7 @@ fun SystemScreen(
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -89,13 +93,13 @@ fun SystemScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         TargetPill("CALORIES", "${profile?.calorieTarget ?: 2000}", NewMePrimary)
                         TargetPill("PROTEIN", "${profile?.proteinTargetGrams ?: 100}g", NewMeSecondary)
-                        TargetPill("CARBS", "${profile?.carbsTargetGrams ?: 200}g", Color(0xFFFBBF24))
-                        TargetPill("FATS", "${profile?.fatTargetGrams ?: 60}g", Color(0xFFF87171))
+                        TargetPill("CARBS", "${profile?.carbsTargetGrams ?: 200}g", NewMeTertiary)
+                        TargetPill("FATS", "${profile?.fatTargetGrams ?: 60}g", NewMeCoral)
                     }
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         TargetPill("WATER", "%.1f L".format(profile?.waterTargetLiters ?: 2.5f), NewMeSecondary)
-                        TargetPill("SLEEP", "%.1f h".format(profile?.sleepTargetHours ?: 7.5f), Color(0xFF818CF8))
+                        TargetPill("SLEEP", "%.1f h".format(profile?.sleepTargetHours ?: 7.5f), NewMeSecondary)
                         TargetPill("ACTIVITY", profile?.primaryActivityType?.take(10) ?: "Gym", NewMePurple)
                         TargetPill("PLAN", profile?.dietaryPreference?.take(10) ?: "Veg", NewMePrimary)
                     }
@@ -107,7 +111,7 @@ fun SystemScreen(
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -123,7 +127,7 @@ fun SystemScreen(
                                 color = NewMePrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
+                                letterSpacing = 0.sp
                             )
                             Text(
                                 "Philosophy: You are not doing this alone.",
@@ -215,7 +219,7 @@ fun SystemScreen(
                             Text("Plays grounded, calm voice guidance for reflections", color = NewMeTextMuted, fontSize = 10.sp)
                         }
                         Switch(
-                            checked = profile?.voiceEnabled ?: true,
+                            checked = profile?.voiceEnabled ?: false,
                             onCheckedChange = { checked ->
                                 if (profile != null) {
                                     viewModel.updateProfile(profile.copy(voiceEnabled = checked))
@@ -252,12 +256,12 @@ fun SystemScreen(
                 RuleCard(
                     number = "01",
                     title = "Never Miss Protein Twice",
-                    description = "One low protein day happens. Two consecutive days begins muscle cannibalization and appetite spirals."
+                    description = "Choose a manageable nutrition target. An imperfect day does not erase your progress."
                 )
                 RuleCard(
                     number = "02",
                     title = "Recovery Is Active Fat Loss",
-                    description = "Sleep debt increases cortisol and ghrelin. 7+ hours of sleep is non-negotiable for true body recomposition."
+                    description = "Rest supports your daily routine. Your sleep target is an estimate, not a medical prescription."
                 )
                 RuleCard(
                     number = "03",
@@ -276,7 +280,7 @@ fun SystemScreen(
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -305,9 +309,9 @@ fun SystemScreen(
         // Medical & Offline Architecture Disclaimer
         item {
             Surface(
-                color = Color(0xFF141926),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Color(0xFF283548)),
+                color = NewMeSurfaceVariant,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
@@ -318,11 +322,13 @@ fun SystemScreen(
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "All data is stored locally in your device's secure Room database. No third-party servers, no logins, no tracking. Future versions can add local biometric lock or optional encrypted backups.",
+                        "Records stay in app-private storage. The Room database itself is not password-encrypted. Automatic cloud backup and device transfer are disabled; this cannot remove copies made previously. No account, analytics, or automatic upload.",
                         color = NewMeTextSecondary,
                         fontSize = 11.sp,
                         lineHeight = 15.sp
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("An update is not a backup. Uninstalling, clearing app data, losing the phone, or losing a backup password can lose your records.", color = NewMeTextSecondary, fontSize = 11.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         "Notice: NewMe is a discipline and habit tracking tool, not a medical diagnosis provider. Consult healthcare professionals before extreme dietary changes.",
@@ -334,11 +340,16 @@ fun SystemScreen(
             }
         }
 
+        item { BackupControls(viewModel) }
+        item { GoalSettings(viewModel) }
+        item { AppearanceSettings(viewModel) }
+        item { CycleControls(viewModel) }
+
         // Recalibrate / Re-run Onboarding
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -374,8 +385,8 @@ fun SystemScreen(
                 onClick = { showResetConfirmDialog = true },
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = NewMeCoral),
                 border = BorderStroke(1.dp, NewMeCoral.copy(alpha = 0.5f)),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().height(48.dp).testTag("reset_data_button")
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("reset_data_button")
             ) {
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
@@ -405,8 +416,10 @@ fun SystemScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.resetAllData()
-                        showResetConfirmDialog = false
+                        viewModel.resetAllData(onSaved = {
+                            showResetConfirmDialog = false
+                            onRerunOnboarding()
+                        })
                     }
                 ) {
                     Text("RESET EVERYTHING", color = NewMeCoral, fontWeight = FontWeight.Bold)
@@ -434,7 +447,7 @@ private fun TargetPill(label: String, value: String, color: Color) {
 private fun RuleCard(number: String, title: String, description: String) {
     Surface(
         color = NewMeSurface,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, NewMeBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -444,7 +457,7 @@ private fun RuleCard(number: String, title: String, description: String) {
                 color = NewMePrimary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Black,
-                letterSpacing = 1.sp
+                letterSpacing = 0.sp
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column {
@@ -471,7 +484,7 @@ private fun EditProfileDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp)
         ) {
@@ -551,7 +564,7 @@ private fun EditProfileDialog(
                         )
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 ) {
                     Text("SAVE TARGETS", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                 }

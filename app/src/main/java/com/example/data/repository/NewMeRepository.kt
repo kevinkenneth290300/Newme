@@ -1,13 +1,22 @@
 package com.example.data.repository
 
+import androidx.room.withTransaction
 import com.example.data.local.NewMeDatabase
 import com.example.data.local.content.ReflectionLibrary
 import com.example.data.local.content.ReflectionItem
 import com.example.data.local.entity.*
+import com.example.data.model.OnboardingPreferences
+import com.example.data.model.DailyGoalKind
+import com.example.data.model.ActivityKind
+import com.example.util.NutritionCalculator
+import com.example.util.DeviceClock
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.Clock
 import java.time.format.DateTimeFormatter
 
 data class DisciplineScoreBreakdown(
@@ -27,7 +36,8 @@ data class DisciplineScoreBreakdown(
     val mealPrepScore: Int = 0,
     val mealPrepMax: Int = 5,
     val habitScore: Int = 0,
-    val habitMax: Int = 5
+    val habitMax: Int = 5,
+    val hasTargetHistory: Boolean = true
 )
 
 data class LevelInfo(
@@ -38,7 +48,8 @@ data class LevelInfo(
     val progress: Float
 )
 
-class NewMeRepository(private val database: NewMeDatabase) {
+class NewMeRepository(private val database: NewMeDatabase, private val clock: Clock = DeviceClock()) {
+    private val gamification = GamificationRepository(database, clock)
 
     private val userProfileDao = database.userProfileDao()
     private val dailyChecklistDao = database.dailyChecklistDao()
@@ -61,103 +72,109 @@ class NewMeRepository(private val database: NewMeDatabase) {
     // User Profile & Gamification
     val userProfile: Flow<UserProfileEntity?> = userProfileDao.getUserProfile()
 
-    suspend fun saveProfile(profile: UserProfileEntity) {
-        userProfileDao.insertOrUpdateProfile(profile)
+    suspend fun saveProfile(profile: UserProfileEntity) = database.withTransaction {
+        NutritionCalculator.validateMetrics(profile.age, profile.heightCm, profile.currentWeightKg,
+            profile.targetWeightKg, profile.bodyFatPercent, profile.skeletalMuscleKg, profile.waistCm, profile.inBodyScore)
+        val existing = userProfileDao.getUserProfileDirect()
+        userProfileDao.insertOrUpdateProfile(if (existing == null) profile else profile.copy(
+            startDate = existing.startDate, initialWeightKg = existing.initialWeightKg,
+            currentXp = existing.currentXp, currentLevel = existing.currentLevel,
+            currentStreak = existing.currentStreak, longestStreak = existing.longestStreak,
+            perfectDays = existing.perfectDays, recoveryDays = existing.recoveryDays,
+            currentMomentum = existing.currentMomentum, isRecoveryActive = existing.isRecoveryActive,
+            isOnboarded = existing.isOnboarded
+        ))
+        updateTodayTargets(profile)
     }
 
-    suspend fun completeOnboarding(profile: UserProfileEntity) {
-        val today = LocalDate.now().toString()
+    suspend fun completeOnboarding(profile: UserProfileEntity, preferences: OnboardingPreferences? = null) = database.withTransaction {
+        require(profile.name.trim().isNotEmpty() && profile.name.length <= 80) { "Enter a name of 1 to 80 characters." }
+        NutritionCalculator.validateMetrics(profile.age, profile.heightCm, profile.currentWeightKg,
+            profile.targetWeightKg, profile.bodyFatPercent, profile.skeletalMuscleKg, profile.waistCm, profile.inBodyScore)
+        val today = LocalDate.now(clock).toString()
+        val existing = userProfileDao.getUserProfileDirect()
+        val isRecalibration = existing?.let { it.isOnboarded || it.startDate.isNotBlank() } == true
         val onboardedProfile = profile.copy(
             isOnboarded = true,
-            hasSeenFirstMorningWelcome = false,
-            startDate = if (profile.startDate.isBlank()) today else profile.startDate,
-            currentLevel = 1,
-            currentXp = 0,
-            currentStreak = 0,
-            longestStreak = 0,
-            perfectDays = 0,
-            recoveryDays = 0,
-            isRecoveryActive = false,
-            currentMomentum = 0
+            hasSeenFirstMorningWelcome = existing?.hasSeenFirstMorningWelcome ?: false,
+            startDate = existing?.startDate?.takeIf { it.isNotBlank() }
+                ?: profile.startDate.ifBlank { today },
+            initialWeightKg = if (isRecalibration) existing!!.initialWeightKg else profile.initialWeightKg,
+            currentLevel = existing?.currentLevel ?: 1,
+            currentXp = existing?.currentXp ?: 0,
+            currentStreak = existing?.currentStreak ?: 0,
+            longestStreak = existing?.longestStreak ?: 0,
+            perfectDays = existing?.perfectDays ?: 0,
+            recoveryDays = existing?.recoveryDays ?: 0,
+            isRecoveryActive = existing?.isRecoveryActive ?: false,
+            currentMomentum = existing?.currentMomentum ?: 0
         )
         userProfileDao.insertOrUpdateProfile(onboardedProfile)
-        bodyMeasurementDao.insertMeasurement(
-            BodyMeasurementEntity(
-                date = today,
-                weightKg = profile.currentWeightKg,
-                bodyFatPercent = profile.bodyFatPercent,
-                skeletalMuscleKg = profile.skeletalMuscleKg,
-                waistCm = profile.waistCm,
-                notes = "Onboarding baseline"
-            )
-        )
-        // Clear any previous stale items for today to generate fresh personalized plan
-        dailyChecklistDao.clearChecklistForDate(today)
-        ensureDateInitialized(today)
-        ensureEnvironmentTasksForDate(today)
+        if (preferences != null) {
+            preferences.dailyGoalKind.validate(preferences.dailyGoalTarget)
+            val settings = database.settingsDao().get() ?: AppSettingsEntity()
+            database.settingsDao().save(settings.copy(dailyGoalType = preferences.dailyGoalKind.name,
+                dailyGoalTarget = preferences.dailyGoalTarget, goalChosen = true, cycleEnabled = preferences.cycleEnabled))
+            database.dailyStateDao().updateGoal(today, preferences.dailyGoalKind.name, preferences.dailyGoalTarget)
+        }
+        NewMeDatabase.seedInitialData(database)
+        updateTodayTargets(profile)
+        if (!isRecalibration) {
+            if (bodyMeasurementDao.getMeasurementForDateDirect(today) == null) {
+                bodyMeasurementDao.insertMeasurement(
+                    BodyMeasurementEntity(
+                        date = today,
+                        weightKg = profile.currentWeightKg,
+                        bodyFatPercent = profile.bodyFatPercent,
+                        skeletalMuscleKg = profile.skeletalMuscleKg,
+                        waistCm = profile.waistCm,
+                        notes = "Onboarding baseline"
+                    )
+                )
+            }
+            ensureDateInitialized(today)
+            ensureEnvironmentTasksForDate(today)
+        }
     }
 
-    suspend fun setFirstMorningWelcomeSeen(seen: Boolean = true) {
+    suspend fun setFirstMorningWelcomeSeen(seen: Boolean = true) = database.withTransaction {
         val current = userProfileDao.getUserProfileDirect()
         if (current != null) {
             userProfileDao.insertOrUpdateProfile(current.copy(hasSeenFirstMorningWelcome = seen))
         }
     }
 
-    suspend fun resetOnboarding() {
+    suspend fun saveWelcomeIntention(mood: String, intention: String) = database.withTransaction {
+        require(mood.isNotBlank() && intention.isNotBlank()) { "Choose your mood and intention." }
+        val date = LocalDate.now(clock).toString()
+        val existing = dailyCheckinDao.getCheckinDirect(date, "MORNING")
+        saveDailyCheckin((existing ?: DailyCheckinEntity(date = date, timeOfDay = "MORNING"))
+            .copy(mood = mood, mattersMost = intention, isCompleted = true))
+        setFirstMorningWelcomeSeen()
+    }
+
+    suspend fun resetOnboarding() = database.withTransaction {
         val current = userProfileDao.getUserProfileDirect()
         if (current != null) {
             userProfileDao.insertOrUpdateProfile(current.copy(isOnboarded = false))
         }
     }
 
-    suspend fun addXp(amount: Int) {
-        val currentProfile = userProfileDao.getUserProfileDirect() ?: return
-        val newXp = (currentProfile.currentXp + amount).coerceAtLeast(0)
-        val newLevel = calculateLevelForXp(newXp)
-        userProfileDao.updateXpAndLevel(newXp, newLevel)
-    }
-
-    fun calculateLevelInfo(totalXp: Int): LevelInfo {
-        val thresholds = listOf(0, 500, 1200, 2000, 3000, 4500, 6500, 9000, 12000, 16000)
-        var level = 1
-        for (i in thresholds.indices) {
-            if (totalXp >= thresholds[i]) {
-                level = i + 1
-            } else {
-                break
-            }
-        }
-        val currentBase = if (level - 1 < thresholds.size) thresholds[level - 1] else thresholds.last()
-        val nextTarget = if (level < thresholds.size) thresholds[level] else currentBase + 4000
-        val range = (nextTarget - currentBase).coerceAtLeast(1)
-        val progress = ((totalXp - currentBase).toFloat() / range).coerceIn(0f, 1f)
-        return LevelInfo(level, totalXp, currentBase, nextTarget, progress)
-    }
-
-    private fun calculateLevelForXp(totalXp: Int): Int {
-        val thresholds = listOf(0, 500, 1200, 2000, 3000, 4500, 6500, 9000, 12000, 16000)
-        var level = 1
-        for (i in thresholds.indices) {
-            if (totalXp >= thresholds[i]) {
-                level = i + 1
-            } else {
-                break
-            }
-        }
-        return level
-    }
+    fun calculateLevelInfo(totalXp: Int): LevelInfo = Levels.info(totalXp)
 
     // Daily Checklist
     fun getChecklistForDate(date: String): Flow<List<DailyChecklistItemEntity>> =
         dailyChecklistDao.getChecklistForDate(date)
 
-    suspend fun toggleChecklistItem(item: DailyChecklistItemEntity) {
-        val now = LocalTime.now().format(DateTimeFormatter.ofPattern("hh:mm a"))
+    suspend fun toggleChecklistItem(item: DailyChecklistItemEntity) = database.withTransaction {
+        val stored = dailyChecklistDao.getItem(item.id) ?: return@withTransaction
+        require(!LocalDate.parse(stored.date).isAfter(LocalDate.now(clock))) { "Only current or past actions can be completed." }
+        val now = LocalTime.now(clock).format(DateTimeFormatter.ofPattern("hh:mm a"))
         val newState = !item.isCompleted
-        dailyChecklistDao.setCompleted(item.id, newState, if (newState) now else "")
+        if (stored.isCompleted == newState) return@withTransaction
+        dailyChecklistDao.setCompleted(stored.id, newState, if (newState) now else "")
         if (newState) {
-            addXp(item.xpReward)
+            gamification.reward("task:${stored.id}", stored.date, stored.xpReward.coerceIn(1, 100))
         }
     }
 
@@ -169,16 +186,26 @@ class NewMeRepository(private val database: NewMeDatabase) {
         dailyChecklistDao.deleteItem(item)
     }
 
-    suspend fun ensureDateInitialized(date: String) {
-        val profile = userProfileDao.getUserProfileDirect()
-        val activities = profile?.selectedActivities ?: ""
-        val hasGym = activities.contains("Gym", ignoreCase = true)
-        val hasWalking = activities.contains("Walking", ignoreCase = true)
-        val hasRunning = activities.contains("Running", ignoreCase = true)
-        val hasYoga = activities.contains("Yoga", ignoreCase = true)
-        val hasDance = activities.contains("Dance", ignoreCase = true)
-        val hasSports = activities.contains("Sports", ignoreCase = true)
-        val hasGeneralActive = activities.contains("Active", ignoreCase = true)
+    suspend fun ensureDateInitialized(date: String) = database.withTransaction {
+        val profile = userProfileDao.getUserProfileDirect()?.takeIf { it.isOnboarded } ?: return@withTransaction
+        if (database.dailyStateDao().get(date) != null) return@withTransaction
+        val settings = database.settingsDao().get() ?: AppSettingsEntity()
+        database.dailyStateDao().insert(DailyStateEntity(
+            date = date, goalType = settings.dailyGoalType, goalTarget = settings.dailyGoalTarget,
+            goalEnabled = settings.goalChosen && date == LocalDate.now(clock).toString(), calorieTarget = profile.calorieTarget,
+            proteinTargetGrams = profile.proteinTargetGrams, waterTargetMl = (profile.waterTargetLiters * 1000).toInt(),
+            sleepTargetMinutes = (profile.sleepTargetHours * 60).toInt(),
+            targetsKnown = date == LocalDate.now(clock).toString(),
+            activityEnabled = profile.selectedActivities.isNotBlank()
+        ))
+        val activities = profile.selectedActivities.split(",").filter { it.isNotBlank() }.map(ActivityKind::fromStored).toSet()
+        val hasGym = ActivityKind.GYM in activities
+        val hasWalking = ActivityKind.WALKING in activities
+        val hasRunning = ActivityKind.RUNNING in activities
+        val hasYoga = ActivityKind.YOGA in activities
+        val hasDance = ActivityKind.DANCING in activities
+        val hasSports = ActivityKind.SPORTS in activities
+        val hasGeneralActive = ActivityKind.OTHER in activities
         val usesSupps = profile?.usesSupplements == true
         val usesRecommendedPlan = profile?.usesRecommendedPlan == true
 
@@ -220,6 +247,8 @@ class NewMeRepository(private val database: NewMeDatabase) {
             if (hasSports) {
                 items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Sports practice / match", isCompleted = false, xpReward = 25, orderIndex = order++))
             }
+            if (ActivityKind.CYCLING in activities) items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Cycling session", xpReward = 20, orderIndex = order++))
+            if (ActivityKind.SWIMMING in activities) items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Swimming session (timer or manual log)", xpReward = 20, orderIndex = order++))
             if (hasGeneralActive && !hasGym && !hasWalking && !hasRunning) {
                 items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Active movement (30+ mins)", isCompleted = false, xpReward = 20, orderIndex = order++))
             }
@@ -237,92 +266,24 @@ class NewMeRepository(private val database: NewMeDatabase) {
 
         val existingMeals = nutritionDao.getMealsForDateDirect(date)
         if (existingMeals.isEmpty()) {
-            val diet = profile?.dietaryPreference ?: "Vegetarian"
-            val defaultMeals = if (usesRecommendedPlan) {
-                listOf(
-                    MealPlanEntity(
-                        date = date,
-                        slot = "Morning",
-                        name = if (diet == "Eggetarian" || diet == "Non-vegetarian") "3 Whole Eggs + 1 Fruit" else "High-Protein Shake / Besan Chilla",
-                        time = "08:00 AM",
-                        foodsDescription = if (diet == "Eggetarian" || diet == "Non-vegetarian") "3 farm eggs (boiled or scrambled) + 1 banana/apple" else "Whey scoop in water + 1 banana or 2 moong/besan chillas",
-                        approxCalories = 380,
-                        proteinGrams = 24,
-                        carbsGrams = 35,
-                        fatsGrams = 12,
-                        source = "Recommended Plan"
-                    ),
-                    MealPlanEntity(
-                        date = date,
-                        slot = "Lunch",
-                        name = if (diet == "Non-vegetarian") "Grilled Chicken + 200g Veg Bowl" else "Dal Bowl + 200g Vegetables (Palak/Beans)",
-                        time = "01:00 PM",
-                        foodsDescription = "1 bowl thick home dal, 200g mixed vegetables (gajar, beans, palak) in 1 tsp mustard oil, optional 1 roti or 100g rice",
-                        approxCalories = 420,
-                        proteinGrams = if (diet == "Non-vegetarian") 36 else 22,
-                        carbsGrams = 52,
-                        fatsGrams = 10,
-                        source = "Recommended Plan"
-                    ),
-                    MealPlanEntity(
-                        date = date,
-                        slot = "Pre-workout",
-                        name = "Hydration & Energy",
-                        time = "04:30 PM",
-                        foodsDescription = "1 ripe banana + 300ml water",
-                        approxCalories = 105,
-                        proteinGrams = 1,
-                        carbsGrams = 27,
-                        fatsGrams = 0,
-                        source = "Recommended Plan"
-                    ),
-                    MealPlanEntity(
-                        date = date,
-                        slot = "Post-workout",
-                        name = "Protein Recovery",
-                        time = "06:30 PM",
-                        foodsDescription = "1 scoop whey protein shaken in cold water",
-                        approxCalories = 125,
-                        proteinGrams = 24,
-                        carbsGrams = 2,
-                        fatsGrams = 1,
-                        source = "Recommended Plan"
-                    ),
-                    MealPlanEntity(
-                        date = date,
-                        slot = "Dinner",
-                        name = if (diet == "Non-vegetarian") "Grilled Chicken / Fish + Steamed Greens" else if (diet == "Eggetarian") "2 Whole Eggs + 200g Sautéed Veg" else "100g Fresh Paneer + 200g Veggies",
-                        time = "08:30 PM",
-                        foodsDescription = "High-protein low-carb dinner with 200g seasonal vegetables (cabbage, capsicum, cauliflower) cooked in 1 tsp oil",
-                        approxCalories = 340,
-                        proteinGrams = 22,
-                        carbsGrams = 14,
-                        fatsGrams = 18,
-                        source = "Recommended Plan"
-                    )
-                )
-            } else {
-                listOf(
-                    MealPlanEntity(date = date, slot = "Morning", name = "Breakfast", time = "08:00 AM", foodsDescription = "Nutritious breakfast with protein", approxCalories = 400, proteinGrams = 20, carbsGrams = 45, fatsGrams = 10, source = "Manual"),
-                    MealPlanEntity(date = date, slot = "Lunch", name = "Lunch", time = "01:00 PM", foodsDescription = "Balanced meal with vegetables", approxCalories = 500, proteinGrams = 25, carbsGrams = 60, fatsGrams = 12, source = "Manual"),
-                    MealPlanEntity(date = date, slot = "Dinner", name = "Dinner", time = "08:30 PM", foodsDescription = "Light dinner with protein source", approxCalories = 400, proteinGrams = 25, carbsGrams = 30, fatsGrams = 14, source = "Manual")
-                )
-            }
-            nutritionDao.insertMeals(defaultMeals)
+            nutritionDao.insertMeals(MealSuggestions.forDate(profile, date))
         }
 
         // Ensure environment & life maintenance tasks are initialized for the date
-        ensureEnvironmentTasksForDate(date)
+        initializeEnvironmentTasks(date)
     }
 
     // Nutrition & Protein
     fun getMealsForDate(date: String): Flow<List<MealPlanEntity>> = nutritionDao.getMealsForDate(date)
 
-    suspend fun toggleMealCompleted(meal: MealPlanEntity) {
+    suspend fun toggleMealCompleted(meal: MealPlanEntity) = database.withTransaction {
+        val stored = nutritionDao.getMeal(meal.id) ?: return@withTransaction
+        validateLoggedDate(stored.date)
         val newState = !meal.isCompleted
-        nutritionDao.setMealCompleted(meal.id, newState)
+        if (stored.isCompleted == newState) return@withTransaction
+        nutritionDao.setMealCompleted(stored.id, newState)
         if (newState) {
-            addXp(10)
+            gamification.reward("meal:${stored.id}", stored.date, 10)
         }
     }
 
@@ -333,11 +294,14 @@ class NewMeRepository(private val database: NewMeDatabase) {
     fun getProteinLogsForDate(date: String): Flow<List<ProteinLogEntity>> =
         nutritionDao.getProteinLogsForDate(date)
 
-    suspend fun logProteinFood(date: String, foodName: String, portionDesc: String, proteinGrams: Int) {
-        nutritionDao.insertProteinLog(
+    suspend fun logProteinFood(date: String, foodName: String, portionDesc: String, proteinGrams: Int) = database.withTransaction {
+        validateLoggedDate(date)
+        require(foodName.isNotBlank() && proteinGrams in 1..500) { "Enter a food name and 1 to 500 grams of protein." }
+        ensureDateInitialized(date)
+        val id = nutritionDao.insertProteinLog(
             ProteinLogEntity(date = date, foodName = foodName, portionDesc = portionDesc, proteinGrams = proteinGrams)
         )
-        addXp(10)
+        gamification.reward("protein:$id", date, 10)
     }
 
     suspend fun deleteProteinLog(log: ProteinLogEntity) = nutritionDao.deleteProteinLog(log)
@@ -345,29 +309,42 @@ class NewMeRepository(private val database: NewMeDatabase) {
     // Water
     fun getWaterLogForDate(date: String): Flow<WaterLogEntity?> = waterDao.getWaterLogForDate(date)
 
-    suspend fun addWater(date: String, amountDeltaMl: Int) {
-        val current = waterDao.getWaterLogForDate(date).firstOrNull()?.amountMl ?: 0
-        val newAmount = (current + amountDeltaMl).coerceAtLeast(0)
-        waterDao.insertOrUpdateWaterLog(WaterLogEntity(date = date, amountMl = newAmount))
-        if (newAmount >= 2500 && current < 2500) {
-            addXp(15) // Water target bonus
+    suspend fun addWater(date: String, amountDeltaMl: Int) = database.withTransaction {
+        validateLoggedDate(date)
+        ensureDateInitialized(date)
+        val current = waterDao.getLog(date)?.amountMl ?: 0
+        val newAmount = (current.toLong() + amountDeltaMl).coerceAtLeast(0L)
+        require(newAmount <= 20_000) { "Enter a daily water total no greater than 20,000 ml." }
+        waterDao.insertOrUpdateWaterLog(WaterLogEntity(date = date, amountMl = newAmount.toInt()))
+        val target = database.dailyStateDao().get(date)?.waterTargetMl ?: 0
+        if (target > 0 && newAmount >= target) {
+            gamification.reward("water:$date", date, 15)
         }
     }
 
-    suspend fun setWater(date: String, amountMl: Int) {
-        waterDao.insertOrUpdateWaterLog(WaterLogEntity(date = date, amountMl = amountMl.coerceAtLeast(0)))
+    suspend fun setWater(date: String, amountMl: Int) = database.withTransaction {
+        validateLoggedDate(date)
+        require(amountMl in 0..20_000) { "Enter water from 0 to 20,000 ml." }
+        ensureDateInitialized(date)
+        waterDao.insertOrUpdateWaterLog(WaterLogEntity(date, amountMl))
+        val target = database.dailyStateDao().get(date)?.waterTargetMl ?: 0
+        if (target > 0 && amountMl >= target) gamification.reward("water:$date", date, 15)
     }
 
     // Sleep
     fun getSleepLogForDate(date: String): Flow<SleepLogEntity?> = sleepDao.getSleepLogForDate(date)
     fun getRecentSleepLogs(): Flow<List<SleepLogEntity>> = sleepDao.getRecentSleepLogs()
 
-    suspend fun logSleep(date: String, bedtime: String, wakeTime: String, durationMinutes: Int, quality: Int) {
+    suspend fun logSleep(date: String, bedtime: String, wakeTime: String, durationMinutes: Int, quality: Int) = database.withTransaction {
+        validateLoggedDate(date)
+        require(durationMinutes in 1..1440 && quality in 1..5) { "Enter a sleep duration of 1 to 1440 minutes and a quality of 1 to 5." }
+        ensureDateInitialized(date)
         sleepDao.insertOrUpdateSleepLog(
             SleepLogEntity(date = date, bedtime = bedtime, wakeTime = wakeTime, durationMinutes = durationMinutes, qualityRating = quality)
         )
-        if (durationMinutes >= 420) { // 7h
-            addXp(20)
+        val target = database.dailyStateDao().get(date)?.sleepTargetMinutes ?: 0
+        if (target > 0 && durationMinutes >= target) {
+            gamification.reward("sleep:$date", date, 20)
         }
     }
 
@@ -375,15 +352,17 @@ class NewMeRepository(private val database: NewMeDatabase) {
     fun getAllSupplements(): Flow<List<SupplementEntity>> = supplementDao.getAllSupplements()
     fun getSupplementLogsForDate(date: String): Flow<List<SupplementLogEntity>> = supplementDao.getSupplementLogsForDate(date)
 
-    suspend fun toggleSupplementTaken(supplement: SupplementEntity, date: String, isTaken: Boolean) {
+    suspend fun toggleSupplementTaken(supplement: SupplementEntity, date: String, isTaken: Boolean) = database.withTransaction {
+        validateLoggedDate(date)
+        val existing = supplementDao.getLog(supplement.id, date)
         if (isTaken) {
             supplementDao.deleteSupplementLog(supplement.id, date)
-        } else {
-            val now = LocalTime.now().format(DateTimeFormatter.ofPattern("hh:mm a"))
+        } else if (existing == null) {
+            val now = LocalTime.now(clock).format(DateTimeFormatter.ofPattern("hh:mm a"))
             supplementDao.insertSupplementLog(
                 SupplementLogEntity(supplementId = supplement.id, supplementName = supplement.name, date = date, takenTime = now)
             )
-            addXp(5)
+            gamification.reward("supplement:${supplement.id}:$date", date, 5, "supplement-definition:${supplement.id}")
         }
     }
 
@@ -395,12 +374,16 @@ class NewMeRepository(private val database: NewMeDatabase) {
     fun getWorkoutSessionForDate(date: String): Flow<WorkoutSessionEntity?> = workoutDao.getWorkoutSessionForDate(date)
     fun getExercisesForSession(sessionId: Long): Flow<List<ExerciseLogEntity>> = workoutDao.getExercisesForSession(sessionId)
 
-    suspend fun saveWorkoutSession(session: WorkoutSessionEntity): Long {
-        val id = workoutDao.insertOrUpdateWorkoutSession(session)
+    suspend fun saveWorkoutSession(session: WorkoutSessionEntity): Long = database.withTransaction {
+        validateLoggedDate(session.date)
+        require(session.durationMinutes in 0..1440 && (!session.isCompleted || session.durationMinutes > 0)) { "Enter a positive completed workout duration." }
+        ensureDateInitialized(session.date)
+        val existing = workoutDao.getSession(session.date)
+        val id = workoutDao.insertOrUpdateWorkoutSession(session.copy(id = existing?.id ?: session.id))
         if (session.isCompleted) {
-            addXp(30)
+            gamification.reward("workout:${session.date}", session.date, 30)
         }
-        return id
+        id
     }
 
     suspend fun addExercise(exercise: ExerciseLogEntity) = workoutDao.insertExercise(exercise)
@@ -410,9 +393,12 @@ class NewMeRepository(private val database: NewMeDatabase) {
     fun getCardioLogsForDate(date: String): Flow<List<CardioLogEntity>> = workoutDao.getCardioLogsForDate(date)
     fun getRecentCardioLogs(): Flow<List<CardioLogEntity>> = workoutDao.getRecentCardioLogs()
 
-    suspend fun logCardio(cardio: CardioLogEntity) {
-        workoutDao.insertCardioLog(cardio)
-        addXp(10)
+    suspend fun logCardio(cardio: CardioLogEntity) = database.withTransaction {
+        validateLoggedDate(cardio.date)
+        require(cardio.durationMinutes in 1..1440 && cardio.distanceKm.isFinite() && cardio.distanceKm >= 0f) { "Enter a valid duration and distance." }
+        ensureDateInitialized(cardio.date)
+        val id = workoutDao.insertCardioLog(cardio)
+        gamification.reward("cardio:$id", cardio.date, 10)
     }
 
     suspend fun deleteCardio(cardio: CardioLogEntity) = workoutDao.deleteCardioLog(cardio)
@@ -421,11 +407,19 @@ class NewMeRepository(private val database: NewMeDatabase) {
     fun getAllMeasurements(): Flow<List<BodyMeasurementEntity>> = bodyMeasurementDao.getAllMeasurements()
     fun getMeasurementForDate(date: String): Flow<BodyMeasurementEntity?> = bodyMeasurementDao.getMeasurementForDate(date)
 
-    suspend fun saveMeasurement(measurement: BodyMeasurementEntity) {
-        bodyMeasurementDao.insertMeasurement(measurement)
-        // Update user profile current weight
+    suspend fun saveMeasurement(measurement: BodyMeasurementEntity) = database.withTransaction {
+        validateLoggedDate(measurement.date)
         val currentProfile = userProfileDao.getUserProfileDirect()
-        if (currentProfile != null) {
+            ?: throw IllegalStateException("Complete setup before recording measurements.")
+        NutritionCalculator.validateMetrics(currentProfile.age, currentProfile.heightCm, measurement.weightKg,
+            bodyFatPercent = measurement.bodyFatPercent, skeletalMuscleKg = measurement.skeletalMuscleKg,
+            waistCm = measurement.waistCm, inBodyScore = measurement.inBodyScore)
+        require(measurement.bmi == null || (measurement.bmi.isFinite() && measurement.bmi > 0f)) { "Enter a valid BMI or leave it unknown." }
+        require(measurement.visceralFat == null || (measurement.visceralFat.isFinite() && measurement.visceralFat >= 0f)) { "Enter a valid optional measurement." }
+        val existing = bodyMeasurementDao.getMeasurementForDateDirect(measurement.date)
+        bodyMeasurementDao.insertMeasurement(measurement.copy(id = measurement.id.takeIf { it > 0 } ?: existing?.id ?: 0))
+        val latest = bodyMeasurementDao.getLatestMeasurement()
+        if (latest?.date == measurement.date) {
             userProfileDao.insertOrUpdateProfile(
                 currentProfile.copy(
                     currentWeightKg = measurement.weightKg,
@@ -442,18 +436,21 @@ class NewMeRepository(private val database: NewMeDatabase) {
     // Meal Prep Inventory
     fun getAllMealPrepItems(): Flow<List<MealPrepItemEntity>> = mealPrepDao.getAllMealPrepItems()
 
-    suspend fun addMealPrepItem(item: MealPrepItemEntity) {
-        mealPrepDao.insertMealPrepItem(item)
-        addXp(15)
+    suspend fun addMealPrepItem(item: MealPrepItemEntity) = database.withTransaction {
+        validateLoggedDate(item.prepDate)
+        require(item.foodName.isNotBlank() && item.portionsAvailable in 1..100) { "Enter a food and 1 to 100 prepared portions." }
+        val id = mealPrepDao.insertMealPrepItem(item)
+        gamification.reward("mealprep:$id", item.prepDate, 15)
     }
 
-    suspend fun consumeMealPrepPortion(item: MealPrepItemEntity) {
-        if (item.portionsAvailable > 1) {
-            mealPrepDao.updateMealPrepItem(item.copy(portionsAvailable = item.portionsAvailable - 1))
+    suspend fun consumeMealPrepPortion(item: MealPrepItemEntity) = database.withTransaction {
+        val stored = mealPrepDao.getItem(item.id) ?: return@withTransaction
+        if (stored.portionsAvailable != item.portionsAvailable) return@withTransaction
+        if (stored.portionsAvailable > 1) {
+            mealPrepDao.updateMealPrepItem(stored.copy(portionsAvailable = stored.portionsAvailable - 1))
         } else {
-            mealPrepDao.deleteMealPrepItem(item)
+            mealPrepDao.deleteMealPrepItem(stored)
         }
-        addXp(10)
     }
 
     suspend fun deleteMealPrepItem(item: MealPrepItemEntity) = mealPrepDao.deleteMealPrepItem(item)
@@ -461,41 +458,46 @@ class NewMeRepository(private val database: NewMeDatabase) {
     // Recovery & Falling Off
     fun getRecoveryForDate(date: String): Flow<RecoveryLogEntity?> = recoveryDao.getRecoveryForDate(date)
 
-    suspend fun applyRecoveryPlan(date: String, obstacle: String, planText: String) {
+    suspend fun applyRecoveryPlan(date: String, obstacle: String, planText: String) = database.withTransaction {
+        validateLoggedDate(date)
+        val existing = recoveryDao.getLog(date)
         recoveryDao.insertOrUpdateRecovery(
-            RecoveryLogEntity(date = date, obstacleReason = obstacle, planSelected = planText, isCompleted = true)
+            RecoveryLogEntity(id = existing?.id ?: 0, date = date, obstacleReason = obstacle, planSelected = planText, isCompleted = false)
         )
-        val profile = userProfileDao.getUserProfileDirect() ?: return
+        val profile = userProfileDao.getUserProfileDirect() ?: return@withTransaction
         userProfileDao.updateStreakStats(
             streak = profile.currentStreak,
             longest = profile.longestStreak,
             perfect = profile.perfectDays,
-            recovery = profile.recoveryDays + 1,
+            recovery = profile.recoveryDays,
             recoveryActive = true
         )
-        addXp(25)
     }
 
-    suspend fun restoreMomentum() {
-        val profile = userProfileDao.getUserProfileDirect() ?: return
+    suspend fun restoreMomentum() = database.withTransaction {
+        val profile = userProfileDao.getUserProfileDirect() ?: return@withTransaction
         userProfileDao.updateStreakStats(
-            streak = (profile.currentStreak + 1).coerceAtLeast(1),
-            longest = maxOf(profile.longestStreak, profile.currentStreak + 1),
+            streak = profile.currentStreak,
+            longest = profile.longestStreak,
             perfect = profile.perfectDays,
             recovery = profile.recoveryDays,
             recoveryActive = false
         )
-        addXp(20)
     }
 
     // Activity Sessions (Gym, Walking, Running, Yoga, Dance, Sports, etc.)
     val allActivitySessions: Flow<List<ActivitySessionEntity>> = activitySessionDao.getAllActivitySessions()
     fun getActivitySessionsForDate(date: String): Flow<List<ActivitySessionEntity>> = activitySessionDao.getActivitySessionsForDate(date)
 
-    suspend fun logActivitySession(session: ActivitySessionEntity): Long {
-        val id = activitySessionDao.insertActivitySession(session)
-        addXp(25)
-        return id
+    suspend fun logActivitySession(session: ActivitySessionEntity): Long = database.withTransaction {
+        validateLoggedDate(session.date)
+        require(session.durationMinutes in 1..1440 && session.distanceKm.isFinite() && session.distanceKm >= 0f && session.steps >= 0) { "Enter a valid activity duration, distance, and step count." }
+        ensureDateInitialized(session.date)
+        val existing = if (session.id > 0) activitySessionDao.getSession(session.id)
+            else session.externalRecordId?.let { activitySessionDao.getSessionByKey(it) }
+        val id = activitySessionDao.insertActivitySession(session.copy(id = existing?.id ?: session.id))
+        if (session.isCompleted) gamification.reward("activity:$id", session.date, 25)
+        id
     }
 
     suspend fun deleteActivitySession(session: ActivitySessionEntity) =
@@ -525,12 +527,15 @@ class NewMeRepository(private val database: NewMeDatabase) {
     fun getEnvironmentTasksForDate(date: String): Flow<List<EnvironmentTaskEntity>> =
         environmentTaskDao.getTasksForDate(date)
 
-    suspend fun toggleEnvironmentTask(item: EnvironmentTaskEntity) {
-        val now = LocalTime.now().format(DateTimeFormatter.ofPattern("hh:mm a"))
+    suspend fun toggleEnvironmentTask(item: EnvironmentTaskEntity) = database.withTransaction {
+        val stored = environmentTaskDao.getTask(item.id) ?: return@withTransaction
+        validateLoggedDate(stored.date)
+        val now = LocalTime.now(clock).format(DateTimeFormatter.ofPattern("hh:mm a"))
         val newState = !item.isCompleted
-        environmentTaskDao.setTaskCompleted(item.id, newState, if (newState) now else "")
+        if (stored.isCompleted == newState) return@withTransaction
+        environmentTaskDao.setTaskCompleted(stored.id, newState, if (newState) now else "")
         if (newState) {
-            addXp(10)
+            gamification.reward("environment:${stored.id}", stored.date, 10)
         }
     }
 
@@ -542,11 +547,13 @@ class NewMeRepository(private val database: NewMeDatabase) {
         environmentTaskDao.deleteTask(task)
     }
 
-    suspend fun ensureEnvironmentTasksForDate(date: String) {
+    suspend fun ensureEnvironmentTasksForDate(date: String) = ensureDateInitialized(date)
+
+    private suspend fun initializeEnvironmentTasks(date: String) {
         val existing = environmentTaskDao.getTasksForDateDirect(date)
         if (existing.isNotEmpty()) return
 
-        val localDate = try { LocalDate.parse(date) } catch (e: Exception) { LocalDate.now() }
+        val localDate = LocalDate.parse(date)
         val dayOfWeek = localDate.dayOfWeek.toString().lowercase().replaceFirstChar { it.uppercase() }
 
         val tasks = mutableListOf<EnvironmentTaskEntity>()
@@ -594,9 +601,12 @@ class NewMeRepository(private val database: NewMeDatabase) {
     fun getAllCheckinsForDate(date: String): Flow<List<DailyCheckinEntity>> =
         dailyCheckinDao.getAllCheckinsForDate(date)
 
-    suspend fun saveDailyCheckin(checkin: DailyCheckinEntity) {
-        dailyCheckinDao.insertOrUpdateCheckin(checkin)
-        addXp(20)
+    suspend fun saveDailyCheckin(checkin: DailyCheckinEntity) = database.withTransaction {
+        validateLoggedDate(checkin.date)
+        require(checkin.timeOfDay in setOf("MORNING", "MIDDAY", "EVENING")) { "Choose morning, midday, or evening." }
+        val existing = dailyCheckinDao.getCheckinDirect(checkin.date, checkin.timeOfDay)
+        dailyCheckinDao.insertOrUpdateCheckin(checkin.copy(id = existing?.id ?: 0))
+        if (checkin.isCompleted) gamification.reward("checkin:${checkin.date}:${checkin.timeOfDay}", checkin.date, 20)
     }
 
     // Contextual Reflection Engine (80-120 Stoic Items with repetition prevention)
@@ -608,12 +618,14 @@ class NewMeRepository(private val database: NewMeDatabase) {
     suspend fun getDailyReflection(timeOfDay: String, mood: String? = null): ReflectionItem =
         getReflectionForContext(timeOfDay, mood)
 
-    suspend fun recordReflectionShown(reflectionId: String, date: String, timeOfDay: String) {
+    suspend fun recordReflectionShown(reflectionId: String, date: String, timeOfDay: String) = database.withTransaction {
+        if (reflectionHistoryDao.wasShown(reflectionId, date, timeOfDay)) return@withTransaction
         reflectionHistoryDao.recordReflectionShown(
             ReflectionHistoryEntity(
                 reflectionId = reflectionId,
                 date = date,
-                timeOfDay = timeOfDay
+                timeOfDay = timeOfDay,
+                timestamp = clock.millis()
             )
         )
     }
@@ -648,54 +660,27 @@ class NewMeRepository(private val database: NewMeDatabase) {
 
     // Reset Data - Complete clean slate (no fake history)
     suspend fun resetAllData() {
-        dailyChecklistDao.clearAll()
-        val emptyProfile = UserProfileEntity(
-            id = 1,
-            name = "",
-            age = 25,
-            sex = "Male",
-            heightCm = 170f,
-            initialWeightKg = 70.0f,
-            currentWeightKg = 70.0f,
-            targetWeightKg = null,
-            bodyFatPercent = null,
-            skeletalMuscleKg = null,
-            waistCm = null,
-            primaryActivityType = "Gym / Strength Training",
-            primaryGoal = "Discipline/self-growth",
-            bmr = 1600,
-            tdee = 2200,
-            calorieTarget = 2000,
-            proteinTargetGrams = 90,
-            carbsTargetGrams = 200,
-            fatTargetGrams = 60,
-            waterTargetLiters = 2.5f,
-            sleepTargetHours = 7.5f,
-            weeklyWorkoutsTarget = 3,
-            goalDescription = "",
-            selectedGoals = "",
-            selectedActivities = "",
-            activityFrequencies = "",
-            trackingLevel = "Focused",
-            dietaryPreference = "Vegetarian",
-            usesSupplements = false,
-            usesRecommendedPlan = false,
-            usesHealthConnect = false,
-            voiceEnabled = false,
-            speakMorning = true,
-            speakMidday = false,
-            speakEvening = true,
-            startDate = "",
-            isOnboarded = false,
-            currentLevel = 1,
-            currentXp = 0,
-            currentStreak = 0,
-            longestStreak = 0,
-            perfectDays = 0,
-            recoveryDays = 0,
-            isRecoveryActive = false,
-            currentMomentum = 0
-        )
-        userProfileDao.insertOrUpdateProfile(emptyProfile)
+        withContext(Dispatchers.IO) {
+            database.clearAllTables()
+        }
+    }
+
+    private fun validateLoggedDate(date: String) {
+        val parsed = LocalDate.parse(date)
+        require(parsed.toString() == date && parsed.year >= 1900 && !parsed.isAfter(LocalDate.now(clock))) { "Choose a valid date no later than today." }
+    }
+
+    suspend fun setDailyGoal(kind: DailyGoalKind, target: Int) = database.withTransaction {
+        kind.validate(target)
+        val settings = database.settingsDao().get() ?: AppSettingsEntity()
+        database.settingsDao().save(settings.copy(dailyGoalType = kind.name, dailyGoalTarget = target, goalChosen = true))
+        val today = LocalDate.now(clock).toString()
+        ensureDateInitialized(today)
+        database.dailyStateDao().updateGoal(today, kind.name, target)
+    }
+
+    private suspend fun updateTodayTargets(profile: UserProfileEntity) {
+        database.dailyStateDao().updateTargets(LocalDate.now(clock).toString(), profile.calorieTarget, profile.proteinTargetGrams,
+            (profile.waterTargetLiters * 1000).toInt(), (profile.sleepTargetHours * 60).toInt(), profile.selectedActivities.isNotBlank())
     }
 }

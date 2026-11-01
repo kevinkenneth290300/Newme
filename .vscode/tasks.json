@@ -1,0 +1,116 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "NewMe: Export Room Schema",
+			"type": "shell",
+			"command": "& { if (-not $env:JAVA_HOME) { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-17*' | Select-Object -First 1).FullName }; if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk' }; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:kspDebugKotlin --console=plain --no-configuration-cache }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Check Foundation",
+			"type": "shell",
+			"command": "& { if (-not $env:JAVA_HOME) { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-17*' | Select-Object -First 1).FullName }; if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk' }; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:kspDebugKotlin :app:testDebugUnitTest --tests com.example.ExampleRobolectricTest --console=plain --no-configuration-cache }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Prepare Local SDK",
+			"type": "shell",
+			"command": "& { $ErrorActionPreference = 'Stop'; $tools = Join-Path $env:LOCALAPPDATA 'NewMeTools'; $env:JAVA_HOME = (Get-ChildItem $tools -Directory -Filter 'jdk-17*' | Select-Object -First 1).FullName; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; $response = Invoke-WebRequest -UseBasicParsing 'https://dl.google.com/android/repository/repository2-1.xml'; $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { $response.Content }; [xml]$repository = $text; $package = $repository.SelectNodes('//*[local-name()=''remotePackage'' and starts-with(@path,''cmdline-tools;'')]') | Sort-Object { [int]$_.revision.major } -Descending | Select-Object -First 1; $archive = $package.SelectSingleNode('.//*[local-name()=''archive'' and *[local-name()=''host-os'']=''windows'']/*[local-name()=''complete'']'); $zip = Join-Path $tools $archive.url; $expected = $archive.SelectSingleNode('./*[local-name()=''checksum'']').InnerText.Trim(); $algorithm = switch ($expected.Length) { 40 { 'SHA1' } 64 { 'SHA256' } default { throw 'Unsupported published Android checksum' } }; if ((Get-FileHash $zip -Algorithm $algorithm).Hash.ToLowerInvariant() -ne $expected.ToLowerInvariant()) { throw 'Android tools checksum mismatch' }; $sdk = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $cli = Join-Path $sdk 'cmdline-tools\\latest'; $manager = Join-Path $cli 'bin\\sdkmanager.bat'; if (-not (Test-Path $manager)) { $extract = Join-Path $tools 'android-cli'; Expand-Archive $zip -DestinationPath $extract -Force; New-Item -ItemType Directory -Path (Join-Path $sdk 'cmdline-tools') -Force | Out-Null; Move-Item (Join-Path $extract 'cmdline-tools') $cli }; $env:ANDROID_HOME = $sdk; & $manager --sdk_root=$sdk --list | Select-String 'platforms;android-36|build-tools;36|platform-tools' }",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "NewMe: Validate Storage",
+			"type": "shell",
+			"command": "& { if (-not $env:JAVA_HOME) { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-17*' | Select-Object -First 1).FullName }; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:kspDebugKotlin :app:testDebugUnitTest --tests com.example.ExampleRobolectricTest --tests com.example.ExampleUnitTest --console=plain --no-configuration-cache }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Validate Themes",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:compileDebugKotlin --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Compile Theme Repair",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:compileDebugKotlin --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Validate Appearance Companion",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:testDebugUnitTest --tests com.example.ExampleUnitTest --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Validate Bundled Design",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:compileDebugKotlin --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Validate Accessible Styling",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:compileDebugKotlin --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Validate Theme Screenshots",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:testDebugUnitTest --tests com.example.GreetingScreenshotTest --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Record Accessible Screenshots",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:testDebugUnitTest --tests com.example.GreetingScreenshotTest -Proborazzi.test.record=true --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Verify Header Screenshots",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:testDebugUnitTest --tests com.example.GreetingScreenshotTest '-Proborazzi.test.record=true' --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Validate Cycle Workflow",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:testDebugUnitTest --tests com.example.ExampleRobolectricTest --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Validate Tracking Rules",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:testDebugUnitTest --tests com.example.ExampleUnitTest --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

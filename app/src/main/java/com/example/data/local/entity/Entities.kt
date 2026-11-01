@@ -2,6 +2,7 @@ package com.example.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import java.util.UUID
 
 @Entity(tableName = "user_profile")
 data class UserProfileEntity(
@@ -199,7 +200,7 @@ data class ActivitySessionEntity(
     val paceMinPerKm: String = "",
     val notes: String = "",
     val source: String = "NewMe", // NewMe, Health Connect, Manual
-    val externalRecordId: String? = null,
+    val externalRecordId: String? = UUID.randomUUID().toString(),
     val isCompleted: Boolean = true
 )
 

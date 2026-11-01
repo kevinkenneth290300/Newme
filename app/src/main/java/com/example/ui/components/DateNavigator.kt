@@ -49,9 +49,9 @@ fun DateNavigator(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(NewMeSurface)
-            .border(1.dp, NewMeBorder, RoundedCornerShape(12.dp))
+            .border(1.dp, NewMeBorder, RoundedCornerShape(8.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -93,7 +93,7 @@ fun DateNavigator(
                 color = if (isToday) NewMePrimary else NewMeTextPrimary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp
+                letterSpacing = 0.sp
             )
             if (!isToday) {
                 Spacer(modifier = Modifier.width(6.dp))

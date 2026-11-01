@@ -133,7 +133,7 @@ fun FallingOffDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             tonalElevation = 8.dp,
             modifier = Modifier
@@ -191,9 +191,9 @@ fun FallingOffDialog(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(NewMeSurfaceElevated)
-                                    .border(1.dp, NewMeBorder, RoundedCornerShape(12.dp))
+                                    .border(1.dp, NewMeBorder, RoundedCornerShape(8.dp))
                                     .clickable { selectedObstacle = obstacle }
                                     .padding(14.dp)
                                     .testTag("obstacle_item_${obstacle.title.replace(" ", "_").lowercase()}")
@@ -226,7 +226,7 @@ fun FallingOffDialog(
                         color = NewMePrimary,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 1.sp
+                        letterSpacing = 0.sp
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -241,14 +241,14 @@ fun FallingOffDialog(
                         color = NewMeTextPrimary,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(NewMeSurfaceElevated)
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -281,8 +281,8 @@ fun FallingOffDialog(
                     ) {
                         OutlinedButton(
                             onClick = { selectedObstacle = null },
-                            modifier = Modifier.weight(1f).height(48.dp),
-                            shape = RoundedCornerShape(12.dp)
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
                             Text("Back", color = NewMeTextSecondary)
                         }
@@ -293,15 +293,15 @@ fun FallingOffDialog(
                                 onDismiss()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NewMeTertiary),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .weight(2f)
-                                .height(48.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("activate_recovery_plan_button")
                         ) {
                             Text(
                                 "ACTIVATE PLAN",
-                                color = Color(0xFF003824),
+                                color = NewMePrimaryDark,
                                 fontWeight = FontWeight.Bold
                             )
                         }

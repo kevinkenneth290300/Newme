@@ -1,6 +1,8 @@
 package com.example.data.companion
 
 import com.example.data.local.entity.UserProfileEntity
+import com.example.data.model.ActivityKind
+import com.example.data.repository.DailyGoalProgress
 import java.time.LocalTime
 
 object CompanionEngine {
@@ -28,8 +30,8 @@ object CompanionEngine {
 
     fun parseCompanionTone(toneString: String?): CompanionTone {
         return when (toneString?.uppercase()?.trim()) {
-            "CALM", "CALM COMPANION" -> CompanionTone.CALM
-            "DIRECT", "DIRECT COACH" -> CompanionTone.DIRECT
+            "CALM", "CALM COMPANION", "CALM & GROUNDED", "PHILOSOPHICAL & REFLECTIVE" -> CompanionTone.CALM
+            "DIRECT", "DIRECT COACH", "DIRECT & CHALLENGING" -> CompanionTone.DIRECT
             "STRICT", "STRICT ACCOUNTABILITY" -> CompanionTone.STRICT
             else -> CompanionTone.BALANCED
         }
@@ -54,7 +56,12 @@ object CompanionEngine {
         waterLoggedMl: Int = 0,
         hasCompletedWorkout: Boolean = false,
         hasLoggedSleep: Boolean = false,
-        isRecoveryMode: Boolean = false
+        isRecoveryMode: Boolean = false,
+        rotationSeed: Long = 0,
+        dailyGoal: DailyGoalProgress? = null,
+        targetProteinGrams: Int? = null,
+        targetWaterMl: Int? = null,
+        isHistorical: Boolean = false
     ): CompanionMessage {
         val name = profile?.name?.trim()?.ifBlank { "there" } ?: "there"
         val timeOfDay = determineTimeOfDayContext(currentHour)
@@ -65,7 +72,7 @@ object CompanionEngine {
         val greeting = when (timeOfDay) {
             TimeOfDayContext.MORNING -> "Good morning, $name."
             TimeOfDayContext.MIDDAY -> "Good afternoon, $name."
-            TimeOfDayContext.EVENING -> if (currentHour >= 19) "You're home, $name." else "Good evening, $name."
+            TimeOfDayContext.EVENING -> "Good evening, $name."
             TimeOfDayContext.NIGHT -> "Good night, $name."
         }
 
@@ -77,66 +84,73 @@ object CompanionEngine {
         } else null
 
         // 3. Select message from content library with deterministic rotation based on hour & mood
-        val allTimeMessages = CompanionContentRepository.getMessages(timeOfDay)
-
-        // Filter priority: mood match & progress match
-        val matchedMessages = allTimeMessages.filter { msg ->
-            (msg.moods.contains(currentMood) || msg.moods.contains(MoodState.OKAY)) &&
-            (msg.progressStates.contains(progressState) || msg.progressStates.contains(ProgressState.ON_TRACK))
+        val allTimeMessages = CompanionContentRepository.getMessages(timeOfDay).filter { content ->
+            content.tone == userTone && currentMood in content.moods && progressState in content.progressStates
         }
 
-        val pool = if (matchedMessages.isNotEmpty()) matchedMessages else allTimeMessages
-        val selectedContent = pool[(currentHour + currentMood.ordinal) % pool.size]
+        // Filter priority: mood match & progress match
+        val pool = allTimeMessages.filter { !it.message.contains("you're home", true) &&
+            !it.message.contains("you've completed", true) && !it.message.contains("you have completed", true) }
+        val selectedContent = pool.getOrNull(if (pool.isEmpty()) 0 else Math.floorMod(rotationSeed + currentMood.ordinal + userTone.ordinal, pool.size.toLong()).toInt())
+        val fallback = "Choose one manageable action. Your next decision can be a fresh start."
 
         // 4. Determine "Your Next Move" intelligently
-        val targetProtein = profile?.proteinTargetGrams ?: 90
-        val targetWater = ((profile?.waterTargetLiters ?: 2.5f) * 1000).toInt()
+        val targetProtein = targetProteinGrams ?: profile?.proteinTargetGrams ?: 0
+        val targetWater = targetWaterMl ?: ((profile?.waterTargetLiters ?: 0f) * 1000).toInt()
+        val gymSelected = profile?.selectedActivities?.split(",")?.any { ActivityKind.fromStored(it) == ActivityKind.GYM } == true
 
         val (nextActionTitle, actionType) = when (timeOfDay) {
             TimeOfDayContext.MORNING -> {
                 when {
-                    waterLoggedMl < 500 -> "Drink 500ml water to start your day" to ActionType.LOG_WATER
-                    proteinLoggedGrams == 0 -> "Log high-protein morning meal" to ActionType.COMPLETE_MEAL
-                    !hasCompletedWorkout && profile?.selectedActivities?.contains("Gym") == true -> "Start with 5-min warm-up" to ActionType.START_WORKOUT
+                    targetWater > 0 && waterLoggedMl < minOf(500, targetWater) -> "Record water you drink" to ActionType.LOG_WATER
+                    profile?.usesRecommendedPlan == true && proteinLoggedGrams == 0 -> "Review your meal suggestions" to ActionType.COMPLETE_MEAL
+                    !hasCompletedWorkout && gymSelected -> "Open your gym plan" to ActionType.START_WORKOUT
                     else -> "Review morning commitments" to ActionType.VIEW_NEXT_STEPS
                 }
             }
             TimeOfDayContext.MIDDAY -> {
                 when {
-                    waterLoggedMl < 1200 -> "Hydrate: Drink water before afternoon" to ActionType.LOG_WATER
-                    proteinLoggedGrams < (targetProtein * 0.4f) -> "Log clean lunch with protein" to ActionType.COMPLETE_MEAL
-                    !hasCompletedWorkout -> "Your evening workout is still ahead" to ActionType.VIEW_NEXT_STEPS
+                    targetWater > 0 && waterLoggedMl < minOf(1200, targetWater) -> "Record water you drink" to ActionType.LOG_WATER
+                    targetProtein > 0 && proteinLoggedGrams < (targetProtein * 0.4f) -> "Record your meal or protein" to ActionType.COMPLETE_MEAL
+                    !hasCompletedWorkout && gymSelected -> "Review your gym plan" to ActionType.START_WORKOUT
                     else -> "Check remaining afternoon actions" to ActionType.VIEW_NEXT_STEPS
                 }
             }
             TimeOfDayContext.EVENING -> {
                 when {
-                    !hasCompletedWorkout && profile?.selectedActivities?.contains("Gym") == true -> "Start your planned workout session" to ActionType.START_WORKOUT
-                    proteinLoggedGrams < (targetProtein * 0.8f) -> "Complete clean dinner" to ActionType.COMPLETE_MEAL
-                    waterLoggedMl < targetWater -> "Reach your daily hydration target" to ActionType.LOG_WATER
+                    !hasCompletedWorkout && gymSelected -> "Open your gym plan" to ActionType.START_WORKOUT
+                    targetProtein > 0 && proteinLoggedGrams < (targetProtein * 0.8f) -> "Record your dinner or protein" to ActionType.COMPLETE_MEAL
+                    targetWater > 0 && waterLoggedMl < targetWater -> "Record your water intake" to ActionType.LOG_WATER
                     else -> "Wind down living space" to ActionType.VIEW_NEXT_STEPS
                 }
             }
             TimeOfDayContext.NIGHT -> {
                 when {
-                    !hasLoggedSleep -> "Log sleep schedule and close the day" to ActionType.SLEEP_PREP
-                    else -> "Protect 7-8 hours of deep sleep" to ActionType.SLEEP_PREP
+                    !hasLoggedSleep -> "Record sleep when you wake" to ActionType.SLEEP_PREP
+                    else -> "Review your evening check-in" to ActionType.CHECK_IN
                 }
             }
         }
 
         // 5. Build voice text
-        val voiceText = "$greeting ${selectedContent.message}"
+        val message = when {
+            isHistorical -> "These are your saved records for the selected day. Today's settings do not rewrite that history."
+            dailyGoal?.met == true -> "Your recorded daily goal is met. Keep the next step manageable."
+            isRecoveryMode -> "Restart with one manageable action. Previously earned XP is yours to keep."
+            else -> selectedContent?.message ?: fallback
+        }
+        val action = if (isHistorical) "Review this day's records" else nextActionTitle
+        val voiceText = "$greeting $message"
 
         return CompanionMessage(
             greeting = greeting,
-            message = selectedContent.message,
+            message = message,
             tone = userTone.displayName,
-            suggestedAction = nextActionTitle,
-            actionType = actionType,
+            suggestedAction = action,
+            actionType = if (isHistorical) ActionType.VIEW_NEXT_STEPS else actionType,
             optionalVoiceText = voiceText,
             context = timeOfDay,
-            priority = selectedContent.priority,
+            priority = selectedContent?.priority ?: 1,
             identityEcho = identityEcho
         )
     }

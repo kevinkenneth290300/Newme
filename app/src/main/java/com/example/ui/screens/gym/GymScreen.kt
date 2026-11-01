@@ -63,7 +63,7 @@ fun GymScreen(viewModel: NewMeViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("GYM & TRAINING", color = NewMePurple, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    Text("GYM & TRAINING", color = NewMePurple, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 0.sp)
                     Text("Track progressive overload. Lift with intent.", color = NewMeTextSecondary, fontSize = 12.sp)
                 }
 
@@ -87,7 +87,7 @@ fun GymScreen(viewModel: NewMeViewModel) {
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -136,7 +136,7 @@ fun GymScreen(viewModel: NewMeViewModel) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(NewMeSurfaceElevated)
                                 .clickable { showEditNotesDialog = true }
                                 .padding(10.dp)
@@ -154,8 +154,8 @@ fun GymScreen(viewModel: NewMeViewModel) {
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isCompleted) NewMeSurfaceElevated else NewMePurple
                         ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().height(44.dp).testTag("toggle_session_completed")
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("toggle_session_completed")
                     ) {
                         Text(
                             if (isCompleted) "SESSION LOGGED (+30 XP)" else "MARK SESSION COMPLETED (+30 XP)",
@@ -191,7 +191,7 @@ fun GymScreen(viewModel: NewMeViewModel) {
             item {
                 Surface(
                     color = NewMeSurface,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
                 ) {
                     Column(
@@ -288,7 +288,7 @@ private fun SessionCheckpoint(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = if (checked) Color(0xFF13221C) else NewMeSurfaceElevated,
+        color = if (checked) NewMeSurfaceVariant else NewMeSurfaceElevated,
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, if (checked) NewMeTertiary.copy(alpha = 0.5f) else Color.Transparent),
         modifier = modifier
@@ -324,7 +324,7 @@ private fun ExerciseCard(
 ) {
     Surface(
         color = NewMeSurface,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, NewMeBorder),
         modifier = Modifier.fillMaxWidth().testTag("exercise_card_${exercise.id}")
     ) {
@@ -372,7 +372,7 @@ private fun CardioCard(
 ) {
     Surface(
         color = NewMeSurface,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, NewMeBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -409,7 +409,7 @@ private fun AddExerciseDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp)
         ) {
@@ -457,7 +457,7 @@ private fun AddExerciseDialog(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePurple),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 ) {
                     Text("SAVE EXERCISE", color = Color.White, fontWeight = FontWeight.Bold)
                 }
@@ -479,7 +479,7 @@ private fun AddCardioDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp)
         ) {
@@ -538,9 +538,9 @@ private fun AddCardioDialog(
                         onAdd(type, d, dist, intensity, cal)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMeSecondary),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 ) {
-                    Text("LOG CARDIO", color = Color(0xFF00363D), fontWeight = FontWeight.Bold)
+                    Text("LOG CARDIO", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -557,7 +557,7 @@ private fun EditNotesDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp)
         ) {
@@ -576,9 +576,9 @@ private fun EditNotesDialog(
                 Button(
                     onClick = { onSave(notesText) },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 ) {
-                    Text("Save Notes", color = Color(0xFF1A0E00), fontWeight = FontWeight.Bold)
+                    Text("Save Notes", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                 }
             }
         }

@@ -1,5 +1,9 @@
 package com.example.util
 
+import com.example.data.model.ActivityKind
+import com.example.data.model.NutritionGoal
+import com.example.data.model.ProfileSex
+
 data class NutritionTargets(
     val bmr: Int,
     val tdee: Int,
@@ -19,39 +23,48 @@ object NutritionCalculator {
         heightCm: Float,
         weightKg: Float,
         activityType: String,
-        goal: String
+        goal: String,
+        targetWeightKg: Float? = null
+    ): NutritionTargets = calculateTargets(age, ProfileSex.fromStored(sex), heightCm, weightKg,
+        ActivityKind.fromStored(activityType), NutritionGoal.fromStored(goal), targetWeightKg)
+
+    fun calculateTargets(
+        age: Int, sex: ProfileSex, heightCm: Float, weightKg: Float,
+        activityType: ActivityKind, goal: NutritionGoal, targetWeightKg: Float? = null
     ): NutritionTargets {
+        validateMetrics(age, heightCm, weightKg, targetWeightKg = targetWeightKg)
         // 1. Mifflin-St Jeor Formula for BMR
-        val bmr = when (sex.lowercase()) {
-            "female" -> (10f * weightKg + 6.25f * heightCm - 5f * age - 161f).toInt()
-            "male" -> (10f * weightKg + 6.25f * heightCm - 5f * age + 5f).toInt()
-            else -> (10f * weightKg + 6.25f * heightCm - 5f * age - 78f).toInt()
+        val bmr = when (sex) {
+            ProfileSex.FEMALE -> (10f * weightKg + 6.25f * heightCm - 5f * age - 161f).toInt()
+            ProfileSex.MALE -> (10f * weightKg + 6.25f * heightCm - 5f * age + 5f).toInt()
+            ProfileSex.OTHER -> (10f * weightKg + 6.25f * heightCm - 5f * age - 78f).toInt()
         }.coerceAtLeast(1000)
 
         // 2. Activity Multiplier based on selected activity
-        val multiplier = when {
-            activityType.contains("inactive", ignoreCase = true) || activityType.contains("zero", ignoreCase = true) -> 1.20f
-            activityType.contains("Yoga", ignoreCase = true) || activityType.contains("Walking", ignoreCase = true) -> 1.35f
-            activityType.contains("Dance", ignoreCase = true) || activityType.contains("Cycling", ignoreCase = true) -> 1.50f
-            activityType.contains("Gym", ignoreCase = true) || activityType.contains("Running", ignoreCase = true) -> 1.55f
-            activityType.contains("Sports", ignoreCase = true) || activityType.contains("Swimming", ignoreCase = true) -> 1.65f
-            else -> 1.45f
-        }
+        val multiplier = activityType.multiplier
 
         val tdee = (bmr * multiplier).toInt()
 
         // 3. Goal Calorie Offset
-        val calorieTarget = when {
-            goal.contains("Fat loss", ignoreCase = true) -> (tdee - 400).coerceAtLeast(1300)
-            goal.contains("Muscle gain", ignoreCase = true) -> (tdee + 300)
-            goal.contains("Recomposition", ignoreCase = true) -> (tdee - 200).coerceAtLeast(1400)
+        val effectiveGoal = if (goal == NutritionGoal.TARGET_WEIGHT) {
+            require(targetWeightKg != null) { "Enter a valid target weight." }
+            when {
+                targetWeightKg < weightKg - 0.5f -> NutritionGoal.FAT_LOSS
+                targetWeightKg > weightKg + 0.5f -> NutritionGoal.MUSCLE_GAIN
+                else -> NutritionGoal.GENERAL_HEALTH
+            }
+        } else goal
+        val calorieTarget = when (effectiveGoal) {
+            NutritionGoal.FAT_LOSS -> (tdee - 400).coerceAtLeast(1300)
+            NutritionGoal.MUSCLE_GAIN -> tdee + 300
+            NutritionGoal.RECOMPOSITION -> (tdee - 200).coerceAtLeast(1400)
             else -> tdee
         }
 
         // 4. Macro Targets
-        val proteinMultiplier = when {
-            goal.contains("Muscle gain", ignoreCase = true) || goal.contains("Recomposition", ignoreCase = true) -> 1.8f
-            goal.contains("Fat loss", ignoreCase = true) -> 1.7f
+        val proteinMultiplier = when (effectiveGoal) {
+            NutritionGoal.MUSCLE_GAIN, NutritionGoal.RECOMPOSITION -> 1.8f
+            NutritionGoal.FAT_LOSS -> 1.7f
             else -> 1.4f
         }
         val proteinGrams = (weightKg * proteinMultiplier).toInt().coerceIn(65, 200)
@@ -70,7 +83,7 @@ object NutritionCalculator {
             else -> 2.2f
         }
 
-        val explanation = "Calculated using Mifflin-St Jeor formula (BMR: $bmr kcal, TDEE: $tdee kcal) tailored to your $goal focus and $activityType routine. Adjust anytime in Profile."
+        val explanation = "General estimates using Mifflin-St Jeor (BMR: $bmr kcal, TDEE: $tdee kcal), ${goal.label}, and ${activityType.label}. These are not measurements or medical advice; individual needs vary."
 
         return NutritionTargets(
             bmr = bmr,
@@ -82,5 +95,20 @@ object NutritionCalculator {
             waterLiters = waterLiters,
             explanation = explanation
         )
+    }
+
+    fun validateMetrics(
+        age: Int, heightCm: Float, weightKg: Float, targetWeightKg: Float? = null,
+        bodyFatPercent: Float? = null, skeletalMuscleKg: Float? = null, waistCm: Float? = null,
+        inBodyScore: Int? = null
+    ) {
+        require(age in 18..100) { "Enter an age from 18 to 100; nutrition estimates are intended for adults." }
+        require(heightCm.isFinite() && heightCm in 100f..250f) { "Enter a height from 100 to 250 cm." }
+        require(weightKg.isFinite() && weightKg in 30f..300f) { "Enter a weight from 30 to 300 kg." }
+        require(targetWeightKg == null || (targetWeightKg.isFinite() && targetWeightKg in 30f..300f)) { "Enter a target weight from 30 to 300 kg." }
+        require(bodyFatPercent == null || (bodyFatPercent.isFinite() && bodyFatPercent in 3f..70f)) { "Enter body fat from 3 to 70%, or leave it unknown." }
+        require(skeletalMuscleKg == null || (skeletalMuscleKg.isFinite() && skeletalMuscleKg > 0f && skeletalMuscleKg <= weightKg)) { "Enter a positive muscle measurement no greater than body weight, or leave it unknown." }
+        require(waistCm == null || (waistCm.isFinite() && waistCm in 40f..250f)) { "Enter a waist measurement from 40 to 250 cm, or leave it unknown." }
+        require(inBodyScore == null || inBodyScore in 0..100) { "Enter a measurement score from 0 to 100, or leave it unknown." }
     }
 }

@@ -1,5 +1,12 @@
 package com.example.data.companion
 
+import com.example.data.local.entity.UserProfileEntity
+import com.example.data.repository.DisciplineScoreBreakdown
+import com.example.data.repository.DailyGoalProgress
+
+data class CompanionContext(val profile: UserProfileEntity?, val score: DisciplineScoreBreakdown,
+    val protein: Int, val water: Int, val workoutDone: Boolean, val sleepLogged: Boolean, val goal: DailyGoalProgress)
+
 enum class CompanionTone(val displayName: String, val philosophy: String) {
     CALM("Calm Companion", "Thoughtful, gentle and reassuring."),
     DIRECT("Direct Coach", "Honest, practical and willing to challenge you."),

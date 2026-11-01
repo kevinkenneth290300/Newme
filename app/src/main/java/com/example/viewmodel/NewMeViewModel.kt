@@ -1,19 +1,44 @@
 package com.example.viewmodel
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.NewMeDatabase
+import com.example.data.backup.BackupStore
 import com.example.data.local.content.ReflectionItem
 import com.example.data.local.entity.*
+import com.example.data.model.OnboardingPreferences
+import com.example.data.model.DailyGoalKind
+import com.example.data.model.ThemeMode
 import com.example.data.companion.*
+import com.example.data.cycle.CycleRepository
+import com.example.data.cycle.CycleRules
+import com.example.data.cycle.CyclePrediction
+import com.example.data.activity.ActivityTrackingRepository
+import com.example.data.activity.ActivityTrackingService
+import com.example.data.model.ActivityKind
 import com.example.data.repository.DisciplineScoreBreakdown
 import com.example.data.repository.LevelInfo
 import com.example.data.repository.NewMeRepository
+import com.example.data.repository.DailyProgressRepository
+import com.example.data.repository.DailyProgressRules
+import com.example.data.repository.DailyGoalProgress
+import com.example.data.repository.GamificationRepository
+import com.example.data.repository.AchievementProgress
+import com.example.data.repository.SettingsRepository
 import com.example.util.VoiceCompanion
+import com.example.util.UiWriteQueue
+import com.example.util.DeviceClock
+import com.example.util.DateSelection
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.Instant
+import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 
 class NewMeViewModel(application: Application) : AndroidViewModel(application) {
@@ -21,12 +46,63 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     private val database = NewMeDatabase.getInstance(application)
     val repository = NewMeRepository(database)
     val voiceCompanion = VoiceCompanion(application)
+    private val clock = DeviceClock()
+    private val now = MutableStateFlow(clock.instant())
+    private val dateSelection = DateSelection(LocalDate.now(clock))
+    private val progressRepository = DailyProgressRepository(database)
+    private val gamification = GamificationRepository(database, clock)
+    private val settingsRepository = SettingsRepository(database)
+    private val cycleRepository = CycleRepository(database, clock)
+    private val trackingRepository = ActivityTrackingRepository(database, clock)
+    val activeTracking = trackingRepository.active.catch { error ->
+        if (error is CancellationException) throw error
+        _operationError.value = "Activity state could not be opened. Saved data was kept."
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val trackedHistory = trackingRepository.history.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val trackingBusy = ActivityTrackingService.commandPending
+    private val _savingActivityLog = MutableStateFlow(false)
+    val savingActivityLog = _savingActivityLog.asStateFlow()
+    val cycleEntries = cycleRepository.entries.catch { error ->
+        if (error is CancellationException) throw error
+        _operationError.value = "Cycle history could not be opened. Existing data was kept."
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val cyclePrediction = combine(cycleEntries, now) { entries, instant ->
+        CycleRules.predict(entries, LocalDateTime.ofInstant(instant, clock.zone).toLocalDate())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), CyclePrediction.Insufficient)
+    private val _savingCycle = MutableStateFlow(false)
+    val savingCycle = _savingCycle.asStateFlow()
+    private val _achievementProgress = MutableStateFlow<List<AchievementProgress>>(emptyList())
+    val achievementProgress = _achievementProgress.asStateFlow()
+    private val backupStore = BackupStore(database)
+    private val _operationError = MutableStateFlow<String?>(null)
+    val operationError = _operationError.asStateFlow()
+    private val writes = UiWriteQueue(viewModelScope, { _operationError.value = it }, {
+        gamification.refresh()
+        _achievementProgress.value = gamification.achievementProgress()
+    })
+    private val _loadState = MutableStateFlow<AppLoadState>(AppLoadState.Loading)
+    val loadState = _loadState.asStateFlow()
+    private val reload = MutableStateFlow(0)
+    private val _savingOnboarding = MutableStateFlow(false)
+    val savingOnboarding = _savingOnboarding.asStateFlow()
+    private val _backupState = MutableStateFlow<BackupUiState>(BackupUiState.Idle)
+    val backupState = _backupState.asStateFlow()
 
     private val _selectedDate = MutableStateFlow(LocalDate.now().toString())
     val selectedDate: StateFlow<String> = _selectedDate.asStateFlow()
 
-    val userProfile: StateFlow<UserProfileEntity?> = repository.userProfile
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val userProfile: StateFlow<UserProfileEntity?> = reload.flatMapLatest {
+        repository.userProfile.onEach { _loadState.value = AppLoadState.Ready }.catch { error ->
+            if (error is CancellationException) throw error
+            _loadState.value = AppLoadState.Error("Local storage could not be opened. Nothing was deleted. Keep the app installed; a compatible update may be needed. Do not clear app data.")
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val appSettings: StateFlow<AppSettingsEntity?> = database.settingsDao().observe().catch { error ->
+        if (error is CancellationException) throw error
+        _loadState.value = AppLoadState.Error("Local settings could not be opened. Nothing was deleted; keep the app installed.")
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val levelInfo: StateFlow<LevelInfo> = userProfile.map { profile ->
         repository.calculateLevelInfo(profile?.currentXp ?: 0)
@@ -34,6 +110,10 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _dailyReflection = MutableStateFlow<ReflectionItem?>(null)
     val dailyReflection: StateFlow<ReflectionItem?> = _dailyReflection.asStateFlow()
+    private var reflectionContext: String? = null
+    private val _savingCheckin = MutableStateFlow(false)
+    val savingCheckin = _savingCheckin.asStateFlow()
+    val offlineVoiceAvailable = voiceCompanion.offlineAvailable
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val environmentTasks: StateFlow<List<EnvironmentTaskEntity>> = _selectedDate.flatMapLatest { date ->
@@ -42,7 +122,7 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val dailyCheckins: StateFlow<List<DailyCheckinEntity>> = _selectedDate.flatMapLatest { date: String ->
-        repository.getAllCheckinsForDate(date)
+        repository.getAllCheckinsForDate(date).map { checkins -> checkins.distinctBy { it.timeOfDay } }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val friendConnections: StateFlow<List<FriendConnectionEntity>> = repository.getAllFriends()
@@ -63,8 +143,8 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
         repository.getProteinLogsForDate(date)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val totalProteinLogged: StateFlow<Int> = proteinLogs.map { logs ->
-        logs.sumOf { it.proteinGrams }
+    val totalProteinLogged: StateFlow<Int> = combine(proteinLogs, meals) { logs, plannedMeals ->
+        logs.sumOf { it.proteinGrams } + plannedMeals.filter { it.isCompleted }.sumOf { it.proteinGrams }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -132,162 +212,39 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
         repository.getRecoveryForDate(date)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    // Dynamic Discipline Score Breakdown (Strict 0-baseline, no fake starter points)
-    val disciplineScore: StateFlow<DisciplineScoreBreakdown> = combine(
-        meals,
-        totalProteinLogged,
-        workoutSession,
-        cardioLogs,
-        activitySessions,
-        waterLog,
-        sleepLog,
-        allSupplements,
-        supplementLogs,
-        mealPrepItems,
-        checklist,
-        userProfile
-    ) { args: Array<Any?> ->
-        @Suppress("UNCHECKED_CAST")
-        val mealList = args[0] as List<MealPlanEntity>
-        val proteinGrams = args[1] as Int
-        val workout = args[2] as WorkoutSessionEntity?
-        @Suppress("UNCHECKED_CAST")
-        val cardioList = args[3] as List<CardioLogEntity>
-        @Suppress("UNCHECKED_CAST")
-        val activities = args[4] as List<ActivitySessionEntity>
-        val water = args[5] as WaterLogEntity?
-        val sleep = args[6] as SleepLogEntity?
-        @Suppress("UNCHECKED_CAST")
-        val suppList = args[7] as List<SupplementEntity>
-        @Suppress("UNCHECKED_CAST")
-        val suppLogs = args[8] as List<SupplementLogEntity>
-        @Suppress("UNCHECKED_CAST")
-        val prepList = args[9] as List<MealPrepItemEntity>
-        @Suppress("UNCHECKED_CAST")
-        val checkList = args[10] as List<DailyChecklistItemEntity>
-        val profile = args[11] as UserProfileEntity?
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val dayRecords = _selectedDate.flatMapLatest(progressRepository::observeDay)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-        val targetProtein = profile?.proteinTargetGrams ?: 90
-        val targetWaterMl = ((profile?.waterTargetLiters ?: 2.5f) * 1000).toInt()
-        val targetSleepMinutes = ((profile?.sleepTargetHours ?: 7.5f) * 60).toInt()
+    val disciplineScore: StateFlow<DisciplineScoreBreakdown> = dayRecords.map { records ->
+        records?.let(DailyProgressRules::score) ?: DisciplineScoreBreakdown(hasTargetHistory = false)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DisciplineScoreBreakdown(hasTargetHistory = false))
 
-        // 1. Nutrition: 25 pts
-        val completedMeals = mealList.count { it.isCompleted }
-        val nutritionScore = if (mealList.isNotEmpty()) {
-            ((completedMeals.toFloat() / mealList.size) * 25).toInt()
-        } else 0
-
-        // 2. Protein: 15 pts
-        val proteinRatio = (proteinGrams.toFloat() / targetProtein).coerceIn(0f, 1f)
-        val proteinScore = (proteinRatio * 15).toInt()
-
-        // 3. Movement / Activity / Workout: 20 pts
-        // Counts structured gym workouts, cardio sessions, or dynamic activity sessions (walking, running, yoga, dance, sports)
-        val hasCompletedGym = workout?.isCompleted == true
-        val hasCompletedActivity = activities.any { it.isCompleted }
-        val hasCardio = cardioList.isNotEmpty() || workout?.cardioDone == true
-
-        val movementBase = when {
-            hasCompletedGym || hasCompletedActivity -> 15
-            workout != null -> 8
-            activities.isNotEmpty() -> 8
-            else -> 0
-        }
-        val movementBonus = if (hasCardio || activities.size > 1) 5 else 0
-        val workoutScore = (movementBase + movementBonus).coerceAtMost(20)
-
-        // 4. Water: 10 pts
-        val currentWater = water?.amountMl ?: 0
-        val waterScore = if (targetWaterMl > 0) {
-            ((currentWater.toFloat() / targetWaterMl).coerceIn(0f, 1f) * 10).toInt()
-        } else 0
-
-        // 5. Sleep: 15 pts
-        val currentSleepMin = sleep?.durationMinutes ?: 0
-        val sleepScore = if (targetSleepMinutes > 0 && sleep != null) {
-            ((currentSleepMin.toFloat() / targetSleepMinutes).coerceIn(0f, 1f) * 15).toInt()
-        } else 0
-
-        // 6. Supplements: 5 pts (if user doesn't take supplements, they are not penalized)
-        val supplementScore = if (profile?.usesSupplements == false) {
-            5
-        } else {
-            val activeSupps = suppList.count { it.isActive }
-            if (activeSupps > 0) {
-                ((suppLogs.size.toFloat() / activeSupps).coerceIn(0f, 1f) * 5).toInt()
-            } else 0
-        }
-
-        // 7. Meal Prep: 5 pts
-        val mealPrepScore = if (prepList.isNotEmpty()) 5 else 0
-
-        // 8. Habits / checklist: 5 pts
-        val checklistDone = checkList.count { it.isCompleted }
-        val habitScore = if (checkList.isNotEmpty()) {
-            ((checklistDone.toFloat() / checkList.size).coerceIn(0f, 1f) * 5).toInt()
-        } else 0
-
-        val total = (nutritionScore + proteinScore + workoutScore + waterScore + sleepScore + supplementScore + mealPrepScore + habitScore).coerceIn(0, 100)
-
-        DisciplineScoreBreakdown(
-            totalScore = total,
-            nutritionScore = nutritionScore,
-            nutritionMax = 25,
-            proteinScore = proteinScore,
-            proteinMax = 15,
-            workoutScore = workoutScore,
-            workoutMax = 20,
-            waterScore = waterScore,
-            waterMax = 10,
-            sleepScore = sleepScore,
-            sleepMax = 15,
-            supplementScore = supplementScore,
-            supplementMax = 5,
-            mealPrepScore = mealPrepScore,
-            mealPrepMax = 5,
-            habitScore = habitScore,
-            habitMax = 5
-        )
-    }.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5000),
-        DisciplineScoreBreakdown()
-    )
+    val dailyGoal: StateFlow<DailyGoalProgress> = dayRecords.map { records ->
+        records?.let(DailyProgressRules::goal) ?: DailyGoalProgress()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DailyGoalProgress())
+    val dailyTargets = dayRecords.map { it?.targets }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private val _currentMood = MutableStateFlow<String>("Okay")
     val currentMood: StateFlow<String> = _currentMood.asStateFlow()
 
-    val companionMessage: StateFlow<CompanionMessage> = combine(
-        userProfile,
-        disciplineScore,
-        totalProteinLogged,
-        waterLog,
-        workoutSession,
-        sleepLog,
-        _currentMood
-    ) { args: Array<Any?> ->
-        val profile = args[0] as UserProfileEntity?
-        val score = args[1] as DisciplineScoreBreakdown
-        val protein = args[2] as Int
-        val water = args[3] as WaterLogEntity?
-        val workout = args[4] as WorkoutSessionEntity?
-        val sleep = args[5] as SleepLogEntity?
-        val moodStr = args[6] as String
-
-        val mood = CompanionEngine.parseMoodState(moodStr)
-        val waterMl = water?.amountMl ?: 0
-        val isWorkoutDone = workout?.isCompleted == true
-        val hasSleep = sleep != null
+    private val companionContext = combine(userProfile, dayRecords, disciplineScore, dailyGoal) { profile, records, score, goal ->
+        CompanionContext(profile, score, records?.nutrition?.protein?.sumOf { it.proteinGrams } ?: 0,
+            records?.rest?.water?.amountMl ?: 0, records?.movement?.workout?.isCompleted == true, records?.rest?.sleep != null, goal)
+    }
+    val companionMessage: StateFlow<CompanionMessage> = combine(companionContext, _currentMood, now, _selectedDate, dailyTargets) { context, moodStr, instant, date, targets ->
+        val profile = context.profile
         CompanionEngine.generateCompanionMessage(
             profile = profile,
-            currentHour = java.time.LocalTime.now().hour,
-            currentMood = mood,
-            progressPercent = score.totalScore,
-            proteinLoggedGrams = protein,
-            waterLoggedMl = waterMl,
-            hasCompletedWorkout = isWorkoutDone,
-            hasLoggedSleep = hasSleep,
-            isRecoveryMode = profile?.isRecoveryActive == true
+            currentHour = LocalDateTime.ofInstant(instant, clock.zone).hour,
+            currentMood = CompanionEngine.parseMoodState(moodStr), progressPercent = context.score.totalScore,
+            proteinLoggedGrams = context.protein, waterLoggedMl = context.water,
+            hasCompletedWorkout = context.workoutDone, hasLoggedSleep = context.sleepLogged,
+            isRecoveryMode = profile?.isRecoveryActive == true,
+            rotationSeed = LocalDate.parse(date).toEpochDay(), dailyGoal = context.goal,
+            targetProteinGrams = targets?.takeIf { it.targetsKnown }?.proteinTargetGrams ?: 0,
+            targetWaterMl = targets?.takeIf { it.targetsKnown }?.waterTargetMl ?: 0,
+            isHistorical = date != LocalDate.now(clock).toString()
         )
     }.stateIn(
         viewModelScope,
@@ -303,28 +260,16 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setMood(mood: String) {
         _currentMood.value = mood
-        val timeContext = CompanionEngine.determineTimeOfDayContext().name
-        viewModelScope.launch {
-            repository.saveDailyCheckin(
-                DailyCheckinEntity(
-                    date = _selectedDate.value,
-                    timeOfDay = timeContext,
-                    mood = mood,
-                    practiceVirtue = "Mood set to $mood",
-                    isCompleted = true
-                )
-            )
-        }
     }
 
     fun markFirstMorningWelcomeSeen() {
-        viewModelScope.launch {
+        writes.launch {
             repository.setFirstMorningWelcomeSeen(true)
         }
     }
 
     fun speakCompanionMessage(text: String) {
-        voiceCompanion.speak(text)
+        speakText(text)
     }
 
     fun stopVoice() {
@@ -332,12 +277,10 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun applyMinimumViableDay(obstacle: String) {
-        viewModelScope.launch {
+        writes.launch {
             val date = _selectedDate.value
             val plan = "1. Hydrate with 500ml water\n2. Hit protein target\n3. 15 min light movement\n4. One clean meal\n5. Protect sleep"
             repository.applyRecoveryPlan(date, obstacle, plan)
-            repository.addWater(date, 500)
-            repository.addXp(30)
         }
     }
 
@@ -355,27 +298,64 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
+            ActivityTrackingService.errors.collect { error ->
+                if (error != null) { _operationError.value = error; ActivityTrackingService.clearError() }
+            }
+        }
+        writes.launch {
+            if (!ActivityTrackingService.isRunning) trackingRepository.recoverInterrupted()
             repository.ensureDateInitialized(_selectedDate.value)
             loadTodayReflection("MORNING", "Good")
+        }
+        viewModelScope.launch {
+            userProfile.filterNotNull().distinctUntilChangedBy { it.isOnboarded }.collect { profile ->
+                if (profile.isOnboarded) writes.launch { repository.ensureDateInitialized(_selectedDate.value) }
+            }
+        }
+        viewModelScope.launch {
+            while (isActive) {
+                onAppResumed()
+                delay(30_000)
+            }
         }
     }
 
     // Actions
     fun selectDate(date: String) {
-        _selectedDate.value = date
-        viewModelScope.launch {
+        dateSelection.select(LocalDate.parse(date))
+        _selectedDate.value = dateSelection.selected.toString()
+        writes.launch {
             repository.ensureDateInitialized(date)
         }
     }
 
+    fun onAppResumed() {
+        now.value = clock.instant()
+        val previousToday = dateSelection.today
+        val newDate = dateSelection.refresh(LocalDate.now(clock)).toString()
+        if (newDate != _selectedDate.value) {
+            _selectedDate.value = newDate
+            writes.launch { repository.ensureDateInitialized(newDate) }
+        }
+        if (previousToday != dateSelection.today && newDate == _selectedDate.value) writes.launch { gamification.refresh() }
+        val key = "${_selectedDate.value}:$reflectionPeriod"
+        if (userProfile.value?.isOnboarded == true && reflectionContext != key) loadTodayReflection(reflectionPeriod, _currentMood.value)
+    }
+
+    val reflectionPeriod: String get() = when (LocalDateTime.ofInstant(clock.instant(), clock.zone).hour) {
+        in 5..11 -> "MORNING"
+        in 12..16 -> "MIDDAY"
+        else -> "EVENING"
+    }
+
     fun toggleChecklistItem(item: DailyChecklistItemEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.toggleChecklistItem(item)
         }
     }
 
     fun addChecklistItem(section: String, title: String, xp: Int = 15) {
-        viewModelScope.launch {
+        writes.launch {
             repository.addChecklistItem(
                 DailyChecklistItemEntity(
                     date = _selectedDate.value,
@@ -389,38 +369,38 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteChecklistItem(item: DailyChecklistItemEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteChecklistItem(item)
         }
     }
 
     // Nutrition & Protein
     fun toggleMealCompleted(meal: MealPlanEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.toggleMealCompleted(meal)
         }
     }
 
     fun addMeal(meal: MealPlanEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.addMeal(meal.copy(date = _selectedDate.value))
         }
     }
 
     fun updateMeal(meal: MealPlanEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.updateMeal(meal)
         }
     }
 
     fun deleteMeal(meal: MealPlanEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteMeal(meal)
         }
     }
 
     fun duplicateMeal(meal: MealPlanEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.addMeal(meal.copy(id = 0, name = "${meal.name} (Copy)"))
         }
     }
@@ -428,7 +408,7 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     fun applyIndianFoundationMeals() {
         val isVeg = userProfile.value?.dietaryPreference?.contains("Non", ignoreCase = true) != true
         val date = _selectedDate.value
-        viewModelScope.launch {
+        writes.launch {
             repository.addMeal(
                 MealPlanEntity(
                     date = date,
@@ -493,65 +473,65 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun quickAddProtein(foodName: String, portion: String, grams: Int) {
-        viewModelScope.launch {
+        writes.launch {
             repository.logProteinFood(_selectedDate.value, foodName, portion, grams)
         }
     }
 
     fun deleteProteinLog(log: ProteinLogEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteProteinLog(log)
         }
     }
 
     // Water
     fun addWater(amountDeltaMl: Int) {
-        viewModelScope.launch {
+        writes.launch {
             repository.addWater(_selectedDate.value, amountDeltaMl)
         }
     }
 
     fun setWater(amountMl: Int) {
-        viewModelScope.launch {
+        writes.launch {
             repository.setWater(_selectedDate.value, amountMl)
         }
     }
 
     // Sleep
     fun logSleep(bedtime: String, wakeTime: String, durationMinutes: Int, quality: Int) {
-        viewModelScope.launch {
+        writes.launch {
             repository.logSleep(_selectedDate.value, bedtime, wakeTime, durationMinutes, quality)
         }
     }
 
     // Supplements
     fun toggleSupplementTaken(supplement: SupplementEntity, isTaken: Boolean) {
-        viewModelScope.launch {
+        writes.launch {
             repository.toggleSupplementTaken(supplement, _selectedDate.value, isTaken)
         }
     }
 
     fun addSupplement(supplement: SupplementEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.addSupplement(supplement)
         }
     }
 
     fun updateSupplement(supplement: SupplementEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.updateSupplement(supplement)
         }
     }
 
     fun deleteSupplement(supplement: SupplementEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteSupplement(supplement)
         }
     }
 
     // Workout & Cardio
     fun saveWorkoutSession(title: String, durationMinutes: Int, warmUp: Boolean, strength: Boolean, cardio: Boolean, coolDown: Boolean, isCompleted: Boolean, notes: String) {
-        viewModelScope.launch {
+        writes.launch {
             val existing = workoutSession.value
             val session = WorkoutSessionEntity(
                 id = existing?.id ?: 0,
@@ -570,7 +550,7 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addExercise(sessionId: Long, name: String, category: String, setsSummary: String, prevPerformance: String) {
-        viewModelScope.launch {
+        writes.launch {
             repository.addExercise(
                 ExerciseLogEntity(
                     sessionId = sessionId,
@@ -584,13 +564,13 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteExercise(exercise: ExerciseLogEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteExercise(exercise)
         }
     }
 
     fun logCardio(type: String, durationMinutes: Int, distanceKm: Float, intensity: String, calories: Int) {
-        viewModelScope.launch {
+        writes.launch {
             repository.logCardio(
                 CardioLogEntity(
                     date = _selectedDate.value,
@@ -605,27 +585,28 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteCardio(cardio: CardioLogEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteCardio(cardio)
         }
     }
 
     // Body Measurements
-    fun saveMeasurement(measurement: BodyMeasurementEntity) {
-        viewModelScope.launch {
+    fun saveMeasurement(measurement: BodyMeasurementEntity, onSaved: () -> Unit = {}) {
+        writes.launch {
             repository.saveMeasurement(measurement)
+            onSaved()
         }
     }
 
     fun deleteMeasurement(measurement: BodyMeasurementEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteMeasurement(measurement)
         }
     }
 
     // Meal Prep
     fun addMealPrepItem(name: String, portions: Int, expiry: String, notes: String) {
-        viewModelScope.launch {
+        writes.launch {
             repository.addMealPrepItem(
                 MealPrepItemEntity(
                     foodName = name,
@@ -639,45 +620,92 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun consumeMealPrepPortion(item: MealPrepItemEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.consumeMealPrepPortion(item)
         }
     }
 
     fun deleteMealPrepItem(item: MealPrepItemEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteMealPrepItem(item)
         }
     }
 
     // Recovery & Falling Off
     fun applyFallingOffPlan(obstacle: String, planText: String) {
-        viewModelScope.launch {
+        writes.launch {
             repository.applyRecoveryPlan(_selectedDate.value, obstacle, planText)
         }
     }
 
     fun restoreMomentum() {
-        viewModelScope.launch {
+        writes.launch {
             repository.restoreMomentum()
         }
     }
 
     // Profile & Settings
     fun updateProfile(profile: UserProfileEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.saveProfile(profile)
         }
     }
 
-    fun completeOnboarding(profile: UserProfileEntity) {
-        viewModelScope.launch {
-            repository.completeOnboarding(profile)
+    fun setDailyGoal(kind: DailyGoalKind, target: Int) {
+        writes.launch { repository.setDailyGoal(kind, target) }
+    }
+
+    fun setAppearance(theme: ThemeMode, reducedMotion: Boolean) {
+        writes.launch { settingsRepository.appearance(theme, reducedMotion) }
+    }
+
+    fun setCycleEnabled(enabled: Boolean) { writes.launch { cycleRepository.enabled(enabled) } }
+
+    fun saveCycle(entry: CycleEntryEntity, onSaved: () -> Unit) {
+        if (_savingCycle.value || writes.isMaintaining) return
+        _savingCycle.value = true
+        writes.launch {
+            try { cycleRepository.save(entry); onSaved() }
+            finally { _savingCycle.value = false }
+        }
+    }
+
+    fun deleteCycle(entry: CycleEntryEntity) { writes.launch { cycleRepository.delete(entry) } }
+
+    fun startActivity(kind: ActivityKind, gps: Boolean) = trackingCommand(ActivityTrackingService.START, kind, gps)
+    fun resumeActivity() {
+        val track = activeTracking.value ?: return
+        trackingCommand(ActivityTrackingService.RESUME, ActivityKind.fromStored(track.activityType), track.gpsEnabled)
+    }
+    fun pauseActivity() = trackingCommand(ActivityTrackingService.PAUSE)
+    fun stopActivity() = trackingCommand(ActivityTrackingService.STOP)
+    fun discardActivity() = trackingCommand(ActivityTrackingService.DISCARD)
+
+    private fun trackingCommand(action: String, kind: ActivityKind = ActivityKind.OTHER, gps: Boolean = false) {
+        if (writes.isMaintaining) { _operationError.value = "Wait for the local data operation to finish."; return }
+        try { ActivityTrackingService.command(getApplication(), action, kind, gps) }
+        catch (failure: Exception) { _operationError.value = "Android could not start tracking. Open NewMe and retry, or use a manual activity log." }
+    }
+
+    fun route(key: String) = database.activityTrackingDao().observeRoute(key)
+    fun deleteRoute(key: String) { writes.launch { trackingRepository.deleteRoute(key) } }
+    fun deleteTrackedActivity(key: String) { writes.launch { trackingRepository.deleteFinished(key) } }
+
+    fun completeOnboarding(profile: UserProfileEntity, preferences: OnboardingPreferences? = null, onSaved: () -> Unit = {}) {
+        if (_savingOnboarding.value || writes.isMaintaining) return
+        _savingOnboarding.value = true
+        writes.launch {
+            try {
+                repository.completeOnboarding(profile, preferences)
+                onSaved()
+            } finally {
+                _savingOnboarding.value = false
+            }
         }
     }
 
     fun restartOnboarding() {
-        viewModelScope.launch {
+        writes.launch {
             repository.resetOnboarding()
         }
     }
@@ -689,58 +717,64 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
         durationMinutes: Int,
         intensity: String,
         distanceKm: Float? = null,
-        notes: String = ""
+        notes: String = "",
+        steps: Int = 0,
+        onSaved: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        if (_savingActivityLog.value || writes.isMaintaining) return
+        _savingActivityLog.value = true
+        val date = _selectedDate.value
+        writes.launch {
+            try {
             val session = ActivitySessionEntity(
-                date = _selectedDate.value,
+                date = date,
                 activityType = activityType,
                 title = title,
                 durationMinutes = durationMinutes,
                 intensity = intensity,
                 distanceKm = distanceKm ?: 0f,
+                steps = steps,
                 notes = notes,
                 isCompleted = true,
                 source = "Manual"
             )
             repository.logActivitySession(session)
+            onSaved()
+            } finally { _savingActivityLog.value = false }
         }
     }
 
     fun deleteActivitySession(session: ActivitySessionEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteActivitySession(session)
         }
     }
 
     fun importHealthConnectData(recordId: String, dataType: String, value: String, date: String) {
-        viewModelScope.launch {
+        writes.launch {
             repository.importHealthConnectRecord(recordId, dataType, value, date)
         }
     }
 
     // Daily Reflections & Voice Companion
     fun loadTodayReflection(timeOfDay: String = "MORNING", mood: String = "Good") {
-        viewModelScope.launch {
+        val date = _selectedDate.value
+        writes.launch {
+            if (userProfile.value?.isOnboarded != true) return@launch
             val reflection = repository.getDailyReflection(timeOfDay, mood)
             _dailyReflection.value = reflection
-            val profile = userProfile.value
-            if (profile?.voiceEnabled == true && reflection != null) {
-                val shouldSpeak = when (timeOfDay.uppercase()) {
-                    "MORNING" -> profile.speakMorning
-                    "MIDDAY" -> profile.speakMidday
-                    "EVENING" -> profile.speakEvening
-                    else -> false
-                }
-                if (shouldSpeak) {
-                    voiceCompanion.speak(reflection.text)
-                }
-            }
+            reflectionContext = "$date:$timeOfDay"
         }
     }
 
+    fun reflectionWasShown(reflectionId: String) {
+        val date = _selectedDate.value
+        val period = reflectionPeriod
+        writes.launch { repository.recordReflectionShown(reflectionId, date, period) }
+    }
+
     fun speakText(text: String) {
-        voiceCompanion.speak(text)
+        if (!voiceCompanion.speak(text)) _operationError.value = "Offline voice is unavailable. Install an offline English voice in Android settings; NewMe will not use a network voice."
     }
 
     fun stopSpeaking() {
@@ -749,13 +783,13 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
 
     // Environment & Living Space
     fun toggleEnvironmentTask(task: EnvironmentTaskEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.toggleEnvironmentTask(task)
         }
     }
 
     fun addEnvironmentTask(title: String, category: String = "MORNING") {
-        viewModelScope.launch {
+        writes.launch {
             repository.addEnvironmentTask(
                 EnvironmentTaskEntity(
                     date = _selectedDate.value,
@@ -768,7 +802,7 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteEnvironmentTask(task: EnvironmentTaskEntity) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteEnvironmentTask(task)
         }
     }
@@ -783,11 +817,16 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
         middayStatus: String = "",
         completedPercent: Int = 0,
         reflectionId: String = "",
-        reflectionText: String = ""
+        reflectionText: String = "",
+        onSaved: () -> Unit = {}
     ) {
-        viewModelScope.launch {
+        if (_savingCheckin.value || writes.isMaintaining) return
+        _savingCheckin.value = true
+        val date = _selectedDate.value
+        writes.launch {
+            try {
             val checkin = DailyCheckinEntity(
-                date = _selectedDate.value,
+                date = date,
                 timeOfDay = timeOfDay,
                 mood = mood,
                 practiceVirtue = practiceVirtue,
@@ -800,31 +839,121 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
                 isCompleted = true
             )
             repository.saveDailyCheckin(checkin)
+            onSaved()
+            } finally { _savingCheckin.value = false }
+        }
+    }
+
+    fun saveWelcome(mood: String, intention: String, onSaved: () -> Unit) {
+        if (_savingCheckin.value || writes.isMaintaining) return
+        _savingCheckin.value = true
+        writes.launch {
+            try {
+                repository.saveWelcomeIntention(mood, intention)
+                _currentMood.value = mood
+                onSaved()
+            } finally { _savingCheckin.value = false }
         }
     }
 
     // Friend Connections (Local Accountability)
     fun addFriend(code: String, name: String) {
-        viewModelScope.launch {
+        writes.launch {
             repository.addFriend(code, name)
         }
     }
 
     fun updateFriendStatus(id: Long, momentum: Int, lastActive: String, status: String) {
-        viewModelScope.launch {
+        writes.launch {
             repository.updateFriendStatus(id, momentum, lastActive, status)
         }
     }
 
     fun removeFriend(id: Long) {
-        viewModelScope.launch {
+        writes.launch {
             repository.deleteFriend(id)
         }
     }
 
-    fun resetAllData() {
+    fun resetAllData(onSaved: () -> Unit = {}) {
         viewModelScope.launch {
-            repository.resetAllData()
+            try {
+                writes.withMaintenance {
+                    ActivityTrackingService.stopForMaintenance()
+                    repository.resetAllData()
+                    voiceCompanion.stop()
+                    _dailyReflection.value = null
+                    _currentMood.value = "Okay"
+                    _selectedDate.value = LocalDate.now().toString()
+                    userProfile.first { it == null }
+                    onSaved()
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _operationError.value = "Reset failed. Please retry; do not clear app data or uninstall."
+            }
+        }
+    }
+
+    fun clearOperationError() { _operationError.value = null }
+
+    fun retryLoading() {
+        _loadState.value = AppLoadState.Loading
+        reload.value += 1
+    }
+
+    fun dismissBackup() {
+        if (_backupState.value != BackupUiState.Working) _backupState.value = BackupUiState.Idle
+    }
+
+    fun exportBackup(uri: Uri, password: CharArray) {
+        runBackup(password) {
+            ActivityTrackingService.flushPending()
+            backupStore.exportTo(getApplication<Application>().contentResolver, uri, password)
+            _backupState.value = BackupUiState.Success("Encrypted backup saved to local storage.")
+        }
+    }
+
+    fun prepareRestore(uri: Uri, password: CharArray) {
+        runBackup(password) {
+            val prepared = backupStore.prepareFrom(getApplication<Application>().contentResolver, uri, password)
+            _backupState.value = BackupUiState.ReadyToRestore(prepared)
+        }
+    }
+
+    fun confirmRestore() {
+        val prepared = (_backupState.value as? BackupUiState.ReadyToRestore)?.backup ?: return
+        runBackup(null) {
+            ActivityTrackingService.stopForMaintenance()
+            trackingRepository.recoverInterrupted()
+            backupStore.restore(prepared)
+            voiceCompanion.stop()
+            _selectedDate.value = LocalDate.now().toString()
+            _backupState.value = BackupUiState.Success("Backup restored. Private reminders remain off until enabled again.")
+        }
+    }
+
+    private fun runBackup(password: CharArray?, block: suspend () -> Unit) {
+        if (_backupState.value == BackupUiState.Working) {
+            password?.fill('\u0000')
+            return
+        }
+        _backupState.value = BackupUiState.Working
+        viewModelScope.launch {
+            try {
+                writes.withMaintenance { block() }
+            } catch (error: CancellationException) {
+                _backupState.value = BackupUiState.Idle
+                throw error
+            } catch (error: Exception) {
+                val message = if (error is IllegalArgumentException || error is java.io.IOException) {
+                    error.message ?: "Backup failed. Existing data has not changed."
+                } else "Backup failed. Existing data has not changed."
+                _backupState.value = BackupUiState.Error(message)
+            } finally {
+                password?.fill('\u0000')
+            }
         }
     }
 

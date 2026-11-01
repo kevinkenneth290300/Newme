@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +62,18 @@ fun TodayScreen(
     val companionMessage by viewModel.companionMessage.collectAsStateWithLifecycle()
     val currentMood by viewModel.currentMood.collectAsStateWithLifecycle()
     val isVoiceSpeaking by viewModel.isVoiceSpeaking.collectAsStateWithLifecycle()
+    val dailyReflection by viewModel.dailyReflection.collectAsStateWithLifecycle()
+    val checkins by viewModel.dailyCheckins.collectAsStateWithLifecycle()
+    val savingCheckin by viewModel.savingCheckin.collectAsStateWithLifecycle()
+    val offlineVoiceAvailable by viewModel.offlineVoiceAvailable.collectAsStateWithLifecycle()
+    val workout by viewModel.workoutSession.collectAsStateWithLifecycle()
+    val dailyGoal by viewModel.dailyGoal.collectAsStateWithLifecycle()
+    val targets by viewModel.dailyTargets.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+    val reflectionVisible by remember { derivedStateOf { listState.layoutInfo.visibleItemsInfo.any { it.key == "reflection" } } }
+    LaunchedEffect(reflectionVisible, dailyReflection?.id, selectedDate) {
+        if (reflectionVisible) dailyReflection?.let { viewModel.reflectionWasShown(it.id) }
+    }
 
     var showBreakdownDialog by remember { mutableStateOf(false) }
     var showFallingOffDialog by remember { mutableStateOf(false) }
@@ -68,10 +82,11 @@ fun TodayScreen(
     var showSleepDialog by remember { mutableStateOf(false) }
     var showActivityDialog by remember { mutableStateOf(false) }
     var showFirstMorningWelcome by remember { mutableStateOf(false) }
+    var showDetailedCheckin by rememberSaveable { mutableStateOf(false) }
 
     // Check if user should see first morning welcome
-    LaunchedEffect(userProfile) {
-        if (userProfile != null && !userProfile!!.hasSeenFirstMorningWelcome) {
+    LaunchedEffect(userProfile, selectedDate) {
+        if (userProfile?.isOnboarded == true && !userProfile!!.hasSeenFirstMorningWelcome && selectedDate == LocalDate.now().toString()) {
             showFirstMorningWelcome = true
         }
     }
@@ -80,14 +95,15 @@ fun TodayScreen(
         "NEWME-${userProfile?.name?.take(3)?.uppercase()?.ifBlank { "USR" } ?: "USR"}-2026"
     } ?: "NEWME-USR-2026"
 
-    val targetProtein = userProfile?.proteinTargetGrams ?: 90
-    val targetWaterMl = ((userProfile?.waterTargetLiters ?: 2.5f) * 1000).toInt()
+    val targetProtein = targets?.takeIf { it.targetsKnown }?.proteinTargetGrams ?: 0
+    val targetWaterMl = targets?.takeIf { it.targetsKnown }?.waterTargetMl ?: 0
     val currentWater = waterLog?.amountMl ?: 0
     val currentSleepMin = sleepLog?.durationMinutes ?: 0
     val sleepHours = currentSleepMin / 60
     val sleepMins = currentSleepMin % 60
 
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(NewMeBackground)
@@ -112,61 +128,52 @@ fun TodayScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "NEWME",
                         color = NewMePrimary,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.sp
                     )
                     Text(
-                        text = "$dayDisplay • PERSONAL COMPANION",
+                        text = dayDisplay,
                         color = NewMeTextMuted,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
-                        letterSpacing = 1.5.sp
+                        letterSpacing = 0.sp
                     )
                 }
 
-                // Level / Streak Badge
-                Surface(
-                    color = NewMeSurfaceVariant,
-                    shape = RoundedCornerShape(9999.dp),
-                    border = BorderStroke(1.dp, NewMeBorderStrong)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("🔥", fontSize = 12.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "${userProfile?.currentStreak ?: 0} DAY STREAK",
-                            color = NewMePrimary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "LVL ${levelInfo.level}",
-                            color = NewMeTextSecondary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("${userProfile?.currentStreak ?: 0} day streak", color = NewMeTertiary, style = MaterialTheme.typography.labelMedium)
+                    Text("Level ${levelInfo.level}", color = NewMeTextSecondary, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
 
         // =========================================================================
         // COMPANION CONVERSATION CARD (Top Priority)
+        item {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Daily Goal", style = MaterialTheme.typography.titleMedium, color = NewMeTextPrimary)
+                Text(if (dailyGoal.available) "${dailyGoal.current} / ${dailyGoal.target} ${dailyGoal.kind.unit}" else "No goal recorded for this date", color = NewMeTextSecondary)
+                if (dailyGoal.available) LinearProgressIndicator(progress = { (dailyGoal.current.toFloat() / dailyGoal.target.coerceAtLeast(1)).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                if (dailyGoal.met) Text("Goal met", color = NewMeTertiary)
+                else if (userProfile?.currentStreak == 0 && (userProfile?.longestStreak ?: 0) > 0) Text("A fresh start. Your earned XP stays with you.", color = NewMeTextSecondary)
+                HorizontalDivider(color = NewMeBorder)
+            }
+        }
+        item(key = "reflection") {
+            DailyReflectionCard(dailyReflection, isVoiceSpeaking, viewModel::speakText, viewModel::stopSpeaking,
+                { viewModel.loadTodayReflection(viewModel.reflectionPeriod, currentMood) }, { showDetailedCheckin = true })
+        }
+        item { ActivityControls(viewModel) }
         // =========================================================================
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorderStrong),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -185,7 +192,7 @@ fun TodayScreen(
                                 color = NewMePrimary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.2.sp
+                                letterSpacing = 0.sp
                             )
                             val identityEcho = companionMessage.identityEcho
                             if (identityEcho != null) {
@@ -243,7 +250,7 @@ fun TodayScreen(
                         color = NewMeTextMuted,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
+                        letterSpacing = 0.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -293,7 +300,7 @@ fun TodayScreen(
             item {
                 Surface(
                     color = NewMeSurfaceVariant,
-                    shape = RoundedCornerShape(18.dp),
+                    shape = RoundedCornerShape(8.dp),
                     border = BorderStroke(1.dp, NewMePrimary.copy(alpha = 0.35f)),
                     modifier = Modifier.fillMaxWidth().testTag("your_next_move_card")
                 ) {
@@ -313,7 +320,7 @@ fun TodayScreen(
                                         color = NewMePrimary,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.sp,
+                                        letterSpacing = 0.sp,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -338,12 +345,12 @@ fun TodayScreen(
                                     ActionType.LOG_PROTEIN -> showProteinDialog = true
                                     ActionType.SLEEP_PREP -> showSleepDialog = true
                                     ActionType.RECOVERY_DAY -> showFallingOffDialog = true
-                                    ActionType.CHECK_IN -> showFirstMorningWelcome = true
+                                    ActionType.CHECK_IN -> showDetailedCheckin = true
                                     else -> onNavigateToPlan()
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             modifier = Modifier.testTag("execute_next_move_button")
                         ) {
@@ -373,7 +380,7 @@ fun TodayScreen(
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -392,10 +399,10 @@ fun TodayScreen(
                                 color = NewMeTextSecondary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
+                                letterSpacing = 0.sp
                             )
                             Text(
-                                "${disciplineScore.totalScore}% DISCIPLINE SCORE",
+                                if (disciplineScore.hasTargetHistory) "${disciplineScore.totalScore}% DISCIPLINE SCORE" else "INSUFFICIENT TARGET HISTORY",
                                 color = NewMePrimary,
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold
@@ -405,7 +412,7 @@ fun TodayScreen(
                         // Progress ring or mini pill
                         Surface(
                             color = NewMeSurfaceDarker,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, NewMeBorder)
                         ) {
                             Text(
@@ -440,28 +447,28 @@ fun TodayScreen(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("PROTEIN", color = NewMeTextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text("${totalProtein}/${targetProtein}g", color = NewMeTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(if (targetProtein > 0) "${totalProtein}/${targetProtein}g" else "${totalProtein}g logged", color = NewMeTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
                         // Water
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("WATER", color = NewMeTextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text("${"%.1f".format(currentWater / 1000f)}/${"%.1f".format(targetWaterMl / 1000f)}L", color = NewMeTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(if (targetWaterMl > 0) "${"%.1f".format(currentWater / 1000f)}/${"%.1f".format(targetWaterMl / 1000f)}L" else "${"%.1f".format(currentWater / 1000f)}L logged", color = NewMeTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
                         // Movement
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("MOVEMENT", color = NewMeTextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text(if (activitySessions.isNotEmpty()) "${activitySessions.size} DONE" else "PENDING", color = if (activitySessions.isNotEmpty()) NewMeTertiary else NewMeTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(if (activitySessions.any { it.isCompleted }) "${activitySessions.count { it.isCompleted }} LOGGED" else "NOT LOGGED", color = NewMeTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
                         // Workout
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("WORKOUT", color = NewMeTextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text(if (disciplineScore.workoutScore >= 15) "DONE" else "PLANNED", color = if (disciplineScore.workoutScore >= 15) NewMeTertiary else NewMeTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(if (workout?.isCompleted == true) "LOGGED" else "NOT LOGGED", color = NewMeTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
                         // Sleep
@@ -481,7 +488,7 @@ fun TodayScreen(
         item {
             Surface(
                 color = NewMeSurfaceElevated,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -538,7 +545,7 @@ fun TodayScreen(
         item {
             Surface(
                 color = NewMeSurface,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NewMeBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -554,7 +561,7 @@ fun TodayScreen(
                                 color = NewMePrimary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
+                                letterSpacing = 0.sp
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Surface(
@@ -593,7 +600,7 @@ fun TodayScreen(
                             activitySessions.forEach { session ->
                                 Surface(
                                     color = NewMeSurfaceElevated,
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(8.dp),
                                     border = BorderStroke(1.dp, NewMeBorder),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
@@ -661,7 +668,7 @@ fun TodayScreen(
                             color = NewMePrimary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp
+                            letterSpacing = 0.sp
                         )
                         Text(
                             "1-Tap adherence tracking",
@@ -709,7 +716,7 @@ fun TodayScreen(
         // =========================================================================
         // ACCOUNTABILITY ALLIES
         // =========================================================================
-        item {
+        if (friendConnections.isNotEmpty()) item {
             FriendAccountabilityCard(
                 friends = friendConnections,
                 userCode = userCode,
@@ -724,7 +731,7 @@ fun TodayScreen(
         item {
             Button(
                 onClick = { showFallingOffDialog = true },
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = NewMeSurfaceDarker,
                     contentColor = NewMeCoral
@@ -732,7 +739,7 @@ fun TodayScreen(
                 border = BorderStroke(1.dp, NewMeCoral.copy(alpha = 0.35f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .heightIn(min = 48.dp)
                     .testTag("falling_off_button")
             ) {
                 Text(
@@ -740,7 +747,7 @@ fun TodayScreen(
                     color = NewMeCoral,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
+                    letterSpacing = 0.sp
                 )
             }
         }
@@ -754,16 +761,25 @@ fun TodayScreen(
     if (showFirstMorningWelcome) {
         FirstMorningWelcomeDialog(
             name = userProfile?.name?.ifBlank { "there" } ?: "there",
+            isSaving = savingCheckin,
             onDismiss = {
                 showFirstMorningWelcome = false
                 viewModel.markFirstMorningWelcomeSeen()
             },
             onComplete = { mood, intention ->
-                showFirstMorningWelcome = false
-                viewModel.markFirstMorningWelcomeSeen()
-                viewModel.setMood(mood)
+                viewModel.saveWelcome(mood, intention) { showFirstMorningWelcome = false }
             }
         )
+    }
+
+    if (showDetailedCheckin) {
+        DailyCheckinDialog(initialTimeOfDay = viewModel.reflectionPeriod, onDismiss = { showDetailedCheckin = false },
+            initialEntry = checkins.firstOrNull { it.timeOfDay == viewModel.reflectionPeriod },
+            actualCompletedPercent = disciplineScore.totalScore, isSaving = savingCheckin,
+            onSaveCheckin = { period, mood, virtue, matters, unfinished, status, percent ->
+                viewModel.recordDailyCheckin(period, mood, virtue, matters, unfinished, status, percent,
+                    onSaved = { showDetailedCheckin = false })
+            })
     }
 
     // Discipline Breakdown Dialog
@@ -874,11 +890,12 @@ fun QuickActionButton(
 fun FirstMorningWelcomeDialog(
     name: String,
     onDismiss: () -> Unit,
-    onComplete: (mood: String, intention: String) -> Unit
+    onComplete: (mood: String, intention: String) -> Unit,
+    isSaving: Boolean = false
 ) {
     val dayOfWeek = LocalDate.now().dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
-    var selectedMood by remember { mutableStateOf("Ready") }
-    var selectedFocus by remember { mutableStateOf("Stay disciplined") }
+    var selectedMood by rememberSaveable { mutableStateOf("") }
+    var selectedFocus by rememberSaveable { mutableStateOf("") }
 
     val moodOptions = listOf(
         "Tired" to "😴",
@@ -901,7 +918,7 @@ fun FirstMorningWelcomeDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = NewMeSurface,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(8.dp),
         title = {
             Column {
                 Text(
@@ -922,7 +939,7 @@ fun FirstMorningWelcomeDialog(
                 // Stoic anchor quote
                 Surface(
                     color = NewMeSurfaceDarker,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(8.dp),
                     border = BorderStroke(1.dp, NewMeBorder)
                 ) {
                     Text(
@@ -1003,17 +1020,18 @@ fun FirstMorningWelcomeDialog(
         },
         confirmButton = {
             Button(
+                enabled = !isSaving && selectedMood.isNotBlank() && selectedFocus.isNotBlank(),
                 onClick = { onComplete(selectedMood, selectedFocus) },
                 colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth().testTag("begin_today_button")
             ) {
                 Text(
-                    "BEGIN TODAY",
+                    if (isSaving) "Saving..." else "Begin Today",
                     color = NewMePrimaryDark,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
+                    letterSpacing = 0.sp
                 )
             }
         }
@@ -1043,7 +1061,7 @@ fun FallingOffMinimumViableDayDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = NewMeSurface,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(8.dp),
         title = {
             Column {
                 Text(
@@ -1077,7 +1095,7 @@ fun FallingOffMinimumViableDayDialog(
                     val isSel = selectedReason == r
                     Surface(
                         color = if (isSel) NewMeCoral.copy(alpha = 0.15f) else NewMeSurfaceDarker,
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(8.dp),
                         border = BorderStroke(1.dp, if (isSel) NewMeCoral else NewMeBorder),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1105,7 +1123,7 @@ fun FallingOffMinimumViableDayDialog(
                     Spacer(modifier = Modifier.height(4.dp))
                     Surface(
                         color = NewMeSurfaceVariant,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(8.dp),
                         border = BorderStroke(1.dp, NewMeBorder)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
@@ -1114,7 +1132,7 @@ fun FallingOffMinimumViableDayDialog(
                                 color = NewMePrimary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
+                                letterSpacing = 0.sp
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text("1. Get your protein\n2. Drink enough water\n3. Move for 10-20 minutes\n4. Eat one proper meal\n5. Protect tonight's sleep", color = NewMeTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
@@ -1127,7 +1145,7 @@ fun FallingOffMinimumViableDayDialog(
             Button(
                 onClick = { onApplyMinimumViableDay(selectedReason) },
                 colors = ButtonDefaults.buttonColors(containerColor = NewMeCoral),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth().testTag("apply_minimum_viable_day_button")
             ) {
                 Text(
@@ -1160,7 +1178,7 @@ fun ChecklistSectionHeader(title: String, subtitle: String) {
             color = NewMePrimary,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp
+            letterSpacing = 0.sp
         )
         Text(
             text = subtitle,
@@ -1177,7 +1195,7 @@ fun ChecklistItemCard(
 ) {
     Surface(
         color = if (item.isCompleted) NewMeSurfaceDarker else NewMeSurface,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, if (item.isCompleted) NewMeBorder else NewMeBorderStrong),
         modifier = Modifier
             .fillMaxWidth()

@@ -34,7 +34,7 @@ fun DailyReflectionCard(
 
     Surface(
         color = NewMeSurface,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, NewMeBorder),
         modifier = modifier
             .fillMaxWidth()
@@ -61,7 +61,7 @@ fun DailyReflectionCard(
                         color = NewMePrimary,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 1.sp,
+                        letterSpacing = 0.sp,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
@@ -117,7 +117,7 @@ fun DailyReflectionCard(
                 color = NewMeTextPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.2.sp
+                letterSpacing = 0.sp
             )
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -170,7 +170,7 @@ fun DailyReflectionCard(
                         text = "CHECK-IN",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.sp
                     )
                 }
             }

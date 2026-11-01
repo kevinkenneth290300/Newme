@@ -27,6 +27,9 @@ interface UserProfileDao {
 
 @Dao
 interface DailyChecklistDao {
+    @Query("SELECT * FROM daily_checklist WHERE id = :id")
+    suspend fun getItem(id: Long): DailyChecklistItemEntity?
+
     @Query("SELECT * FROM daily_checklist WHERE date = :date ORDER BY orderIndex ASC, id ASC")
     fun getChecklistForDate(date: String): Flow<List<DailyChecklistItemEntity>>
 
@@ -57,6 +60,12 @@ interface DailyChecklistDao {
 
 @Dao
 interface NutritionDao {
+    @Query("SELECT * FROM protein_logs WHERE date = :date")
+    suspend fun getProteinLogs(date: String): List<ProteinLogEntity>
+
+    @Query("SELECT * FROM meal_plans WHERE id = :id")
+    suspend fun getMeal(id: Long): MealPlanEntity?
+
     @Query("SELECT * FROM meal_plans WHERE date = :date ORDER BY id ASC")
     fun getMealsForDate(date: String): Flow<List<MealPlanEntity>>
 
@@ -95,6 +104,9 @@ interface NutritionDao {
 @Dao
 interface WaterDao {
     @Query("SELECT * FROM water_logs WHERE date = :date LIMIT 1")
+    suspend fun getLog(date: String): WaterLogEntity?
+
+    @Query("SELECT * FROM water_logs WHERE date = :date LIMIT 1")
     fun getWaterLogForDate(date: String): Flow<WaterLogEntity?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -103,6 +115,9 @@ interface WaterDao {
 
 @Dao
 interface SleepDao {
+    @Query("SELECT * FROM sleep_logs WHERE date = :date LIMIT 1")
+    suspend fun getLog(date: String): SleepLogEntity?
+
     @Query("SELECT * FROM sleep_logs WHERE date = :date LIMIT 1")
     fun getSleepLogForDate(date: String): Flow<SleepLogEntity?>
 
@@ -115,6 +130,9 @@ interface SleepDao {
 
 @Dao
 interface SupplementDao {
+    @Query("SELECT * FROM supplement_logs WHERE supplementId = :id AND date = :date ORDER BY id DESC LIMIT 1")
+    suspend fun getLog(id: Long, date: String): SupplementLogEntity?
+
     @Query("SELECT * FROM supplements ORDER BY id ASC")
     fun getAllSupplements(): Flow<List<SupplementEntity>>
 
@@ -139,8 +157,14 @@ interface SupplementDao {
 
 @Dao
 interface WorkoutDao {
-    @Query("SELECT * FROM workout_sessions WHERE date = :date LIMIT 1")
+    @Query("SELECT * FROM cardio_logs WHERE date = :date")
+    suspend fun getCardioLogs(date: String): List<CardioLogEntity>
+
+    @Query("SELECT * FROM workout_sessions WHERE date = :date ORDER BY id DESC LIMIT 1")
     fun getWorkoutSessionForDate(date: String): Flow<WorkoutSessionEntity?>
+
+    @Query("SELECT * FROM workout_sessions WHERE date = :date ORDER BY id DESC LIMIT 1")
+    suspend fun getSession(date: String): WorkoutSessionEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateWorkoutSession(session: WorkoutSessionEntity): Long
@@ -179,11 +203,14 @@ interface BodyMeasurementDao {
     @Query("SELECT * FROM body_measurements ORDER BY date DESC")
     fun getAllMeasurements(): Flow<List<BodyMeasurementEntity>>
 
-    @Query("SELECT * FROM body_measurements WHERE date = :date LIMIT 1")
+    @Query("SELECT * FROM body_measurements WHERE date = :date ORDER BY id DESC LIMIT 1")
     fun getMeasurementForDate(date: String): Flow<BodyMeasurementEntity?>
 
-    @Query("SELECT * FROM body_measurements WHERE date = :date LIMIT 1")
+    @Query("SELECT * FROM body_measurements WHERE date = :date ORDER BY id DESC LIMIT 1")
     suspend fun getMeasurementForDateDirect(date: String): BodyMeasurementEntity?
+
+    @Query("SELECT * FROM body_measurements ORDER BY date DESC, id DESC LIMIT 1")
+    suspend fun getLatestMeasurement(): BodyMeasurementEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMeasurement(measurement: BodyMeasurementEntity): Long
@@ -197,6 +224,9 @@ interface BodyMeasurementDao {
 
 @Dao
 interface MealPrepDao {
+    @Query("SELECT * FROM meal_prep_items WHERE id = :id")
+    suspend fun getItem(id: Long): MealPrepItemEntity?
+
     @Query("SELECT * FROM meal_prep_items ORDER BY id DESC")
     fun getAllMealPrepItems(): Flow<List<MealPrepItemEntity>>
 
@@ -213,9 +243,15 @@ interface MealPrepDao {
 @Dao
 interface AchievementDao {
     @Query("SELECT * FROM achievements")
+    suspend fun getAll(): List<AchievementEntity>
+
+    @Query("UPDATE achievements SET isUnlocked = 1, unlockedDate = :date WHERE id = :id AND isUnlocked = 0")
+    suspend fun unlockOnce(id: String, date: String): Int
+
+    @Query("SELECT * FROM achievements")
     fun getAllAchievements(): Flow<List<AchievementEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(achievements: List<AchievementEntity>)
 
     @Query("UPDATE achievements SET isUnlocked = 1, unlockedDate = :date WHERE id = :id")
@@ -224,6 +260,9 @@ interface AchievementDao {
 
 @Dao
 interface RecoveryDao {
+    @Query("SELECT * FROM recovery_logs WHERE date = :date ORDER BY id DESC LIMIT 1")
+    suspend fun getLog(date: String): RecoveryLogEntity?
+
     @Query("SELECT * FROM recovery_logs WHERE date = :date LIMIT 1")
     fun getRecoveryForDate(date: String): Flow<RecoveryLogEntity?>
 
@@ -233,6 +272,15 @@ interface RecoveryDao {
 
 @Dao
 interface ActivitySessionDao {
+    @Query("DELETE FROM activity_sessions WHERE source = 'Phone timer' AND externalRecordId LIKE :pattern")
+    suspend fun deleteTrackedSummaries(pattern: String)
+
+    @Query("SELECT * FROM activity_sessions WHERE id = :id")
+    suspend fun getSession(id: Long): ActivitySessionEntity?
+
+    @Query("SELECT * FROM activity_sessions WHERE externalRecordId = :key ORDER BY id DESC LIMIT 1")
+    suspend fun getSessionByKey(key: String): ActivitySessionEntity?
+
     @Query("SELECT * FROM activity_sessions WHERE date = :date ORDER BY id DESC")
     fun getActivitySessionsForDate(date: String): Flow<List<ActivitySessionEntity>>
 
@@ -272,6 +320,9 @@ interface HealthConnectImportDao {
 
 @Dao
 interface EnvironmentTaskDao {
+    @Query("SELECT * FROM environment_tasks WHERE id = :id")
+    suspend fun getTask(id: Long): EnvironmentTaskEntity?
+
     @Query("SELECT * FROM environment_tasks WHERE date = :date ORDER BY orderIndex ASC, id ASC")
     fun getTasksForDate(date: String): Flow<List<EnvironmentTaskEntity>>
 
@@ -302,13 +353,13 @@ interface EnvironmentTaskDao {
 
 @Dao
 interface DailyCheckinDao {
-    @Query("SELECT * FROM daily_checkins WHERE date = :date AND timeOfDay = :timeOfDay LIMIT 1")
+    @Query("SELECT * FROM daily_checkins WHERE date = :date AND timeOfDay = :timeOfDay ORDER BY timestamp DESC, id DESC LIMIT 1")
     fun getCheckin(date: String, timeOfDay: String): Flow<DailyCheckinEntity?>
 
-    @Query("SELECT * FROM daily_checkins WHERE date = :date AND timeOfDay = :timeOfDay LIMIT 1")
+    @Query("SELECT * FROM daily_checkins WHERE date = :date AND timeOfDay = :timeOfDay ORDER BY timestamp DESC, id DESC LIMIT 1")
     suspend fun getCheckinDirect(date: String, timeOfDay: String): DailyCheckinEntity?
 
-    @Query("SELECT * FROM daily_checkins WHERE date = :date")
+    @Query("SELECT * FROM daily_checkins WHERE date = :date ORDER BY timeOfDay, timestamp DESC, id DESC")
     fun getAllCheckinsForDate(date: String): Flow<List<DailyCheckinEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -317,6 +368,9 @@ interface DailyCheckinDao {
 
 @Dao
 interface ReflectionHistoryDao {
+    @Query("SELECT EXISTS(SELECT 1 FROM reflection_history WHERE reflectionId = :id AND date = :date AND timeOfDay = :period)")
+    suspend fun wasShown(id: String, date: String, period: String): Boolean
+
     @Query("SELECT reflectionId FROM reflection_history ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentReflectionIds(limit: Int = 30): List<String>
 

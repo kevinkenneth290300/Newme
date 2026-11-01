@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.ui.theme.*
+import com.example.data.local.entity.DailyCheckinEntity
 
 @Composable
 fun DailyCheckinDialog(
@@ -36,15 +38,18 @@ fun DailyCheckinDialog(
         refuseToLeaveUnfinished: String,
         middayStatus: String,
         completedPercent: Int
-    ) -> Unit
+    ) -> Unit,
+    initialEntry: DailyCheckinEntity? = null,
+    actualCompletedPercent: Int = 0,
+    isSaving: Boolean = false
 ) {
-    var selectedTimeOfDay by remember { mutableStateOf(initialTimeOfDay) }
-    var selectedMood by remember { mutableStateOf("Focused") }
-    var selectedVirtue by remember { mutableStateOf("Discipline") }
-    var mattersMost by remember { mutableStateOf("") }
-    var refuseToLeaveUnfinished by remember { mutableStateOf("") }
-    var middayStatus by remember { mutableStateOf("On Track") }
-    var completedPercent by remember { mutableStateOf(50) }
+    var selectedTimeOfDay by rememberSaveable { mutableStateOf(initialEntry?.timeOfDay ?: initialTimeOfDay) }
+    var selectedMood by rememberSaveable { mutableStateOf(initialEntry?.mood.orEmpty()) }
+    var selectedVirtue by rememberSaveable { mutableStateOf(initialEntry?.practiceVirtue.orEmpty()) }
+    var mattersMost by rememberSaveable { mutableStateOf(initialEntry?.mattersMost.orEmpty()) }
+    var refuseToLeaveUnfinished by rememberSaveable { mutableStateOf(initialEntry?.refuseToLeaveUnfinished.orEmpty()) }
+    var middayStatus by rememberSaveable { mutableStateOf(initialEntry?.middayStatus.orEmpty()) }
+    var completedPercent by rememberSaveable { mutableStateOf(initialEntry?.completedPercent ?: actualCompletedPercent) }
 
     val moods = listOf("Focused", "Calm", "Energized", "Tired", "Stressed", "Drifting")
     val virtues = listOf("Discipline", "Courage", "Wisdom", "Temperance", "Patience", "Grit")
@@ -52,7 +57,7 @@ fun DailyCheckinDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurface,
             border = BorderStroke(1.dp, NewMeBorder),
             modifier = Modifier
@@ -78,7 +83,7 @@ fun DailyCheckinDialog(
                             color = NewMePrimary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
+                            letterSpacing = 0.sp
                         )
                         Text(
                             text = "Acknowledge reality. Align intent.",
@@ -127,7 +132,7 @@ fun DailyCheckinDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Mood Selection
-                Text("CURRENT INTERNAL STATE", color = NewMeTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("CURRENT INTERNAL STATE", color = NewMeTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.sp)
                 Spacer(modifier = Modifier.height(6.dp))
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -158,7 +163,7 @@ fun DailyCheckinDialog(
                 // Time-specific Form Fields
                 when (selectedTimeOfDay) {
                     "MORNING" -> {
-                        Text("VIRTUE TO PRACTICE TODAY", color = NewMeTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("VIRTUE TO PRACTICE TODAY", color = NewMeTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.sp)
                         Spacer(modifier = Modifier.height(6.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(virtues) { virtue ->
@@ -214,7 +219,7 @@ fun DailyCheckinDialog(
                     }
 
                     "MIDDAY" -> {
-                        Text("MIDDAY STATUS", color = NewMeTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("MIDDAY STATUS", color = NewMeTextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.sp)
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             middayStatuses.forEach { status ->
@@ -306,6 +311,7 @@ fun DailyCheckinDialog(
 
                 // Save Check-in Button
                 Button(
+                    enabled = !isSaving && selectedMood.isNotBlank(),
                     onClick = {
                         onSaveCheckin(
                             selectedTimeOfDay,
@@ -319,17 +325,17 @@ fun DailyCheckinDialog(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp)
+                        .heightIn(min = 46.dp)
                         .testTag("save_checkin_button"),
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
-                        text = "RECORD CHECK-IN (+20 XP)",
+                        text = if (isSaving) "Saving..." else "Save Check-in",
                         color = NewMePrimaryDark,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.sp
                     )
                 }
             }

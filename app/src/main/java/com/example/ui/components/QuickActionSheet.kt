@@ -39,7 +39,7 @@ fun QuickWaterDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("quick_water_dialog")
         ) {
@@ -90,11 +90,11 @@ fun QuickWaterDialog(
                                 onDismiss()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NewMeSurfaceElevated),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp)
-                                .border(1.dp, NewMeSecondary.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                .heightIn(min = 48.dp)
+                                .border(1.dp, NewMeSecondary.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
                                 .testTag("quick_water_${ml}ml_button")
                         ) {
                             Text(
@@ -130,10 +130,10 @@ fun QuickWaterDialog(
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = NewMeSecondary),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.height(56.dp).testTag("custom_water_add_button")
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.heightIn(min = 56.dp).testTag("custom_water_add_button")
                     ) {
-                        Text("Add", color = Color(0xFF00363D), fontWeight = FontWeight.Bold)
+                        Text("Add", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -172,7 +172,7 @@ fun QuickProteinDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("quick_protein_dialog")
         ) {
@@ -203,9 +203,9 @@ fun QuickProteinDialog(
                         items(DEFAULT_PROTEIN_FOODS) { food ->
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(NewMeSurfaceElevated)
-                                    .border(1.dp, NewMeBorder, RoundedCornerShape(12.dp))
+                                    .border(1.dp, NewMeBorder, RoundedCornerShape(8.dp))
                                     .clickable {
                                         selectedFood = food
                                         foodNameInput = food.name
@@ -233,8 +233,8 @@ fun QuickProteinDialog(
                             portionInput = "1 Serving"
                             proteinGramsInput = "20"
                         },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("custom_protein_button")
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("custom_protein_button")
                     ) {
                         Text("+ Custom Food Entry", color = NewMePrimary)
                     }
@@ -278,8 +278,8 @@ fun QuickProteinDialog(
                                 selectedFood = null
                                 isCustom = false
                             },
-                            modifier = Modifier.weight(1f).height(48.dp),
-                            shape = RoundedCornerShape(12.dp)
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
                             Text("Back", color = NewMeTextSecondary)
                         }
@@ -292,10 +292,10 @@ fun QuickProteinDialog(
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1.5f).height(48.dp).testTag("confirm_protein_log_button")
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1.5f).heightIn(min = 48.dp).testTag("confirm_protein_log_button")
                         ) {
-                            Text("LOG PROTEIN", color = Color(0xFF1A0E00), fontWeight = FontWeight.Bold)
+                            Text("LOG PROTEIN", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -318,7 +318,7 @@ fun QuickSleepDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("quick_sleep_dialog")
         ) {
@@ -388,7 +388,7 @@ fun QuickSleepDialog(
                         ) {
                             Text(
                                 "$star★",
-                                color = if (quality == star) Color(0xFF1A0E00) else NewMeTextSecondary,
+                                color = if (quality == star) NewMePrimaryDark else NewMeTextSecondary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -422,10 +422,10 @@ fun QuickSleepDialog(
                         onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMeTertiary),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(48.dp).testTag("save_sleep_button")
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("save_sleep_button")
                 ) {
-                    Text("SAVE SLEEP LOG", color = Color(0xFF003824), fontWeight = FontWeight.Bold)
+                    Text("SAVE SLEEP LOG", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -458,7 +458,7 @@ fun QuickActivityDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("quick_activity_dialog")
         ) {
@@ -608,8 +608,8 @@ fun QuickActivityDialog(
                         onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(48.dp).testTag("save_activity_button")
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("save_activity_button")
                 ) {
                     Text("LOG ACTIVITY (+20 PTS)", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                 }

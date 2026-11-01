@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -31,6 +33,7 @@ import com.example.ui.screens.system.SystemScreen
 import com.example.ui.screens.today.TodayScreen
 import com.example.ui.theme.*
 import com.example.viewmodel.NewMeViewModel
+import com.example.viewmodel.AppLoadState
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector, val tag: String) {
     object Splash : Screen("splash", "Splash", Icons.Default.Bolt, "nav_splash")
@@ -59,10 +62,45 @@ fun NewMeApp(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: startDestination
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+    val loadState by viewModel.loadState.collectAsStateWithLifecycle()
+    val operationError by viewModel.operationError.collectAsStateWithLifecycle()
+    val snackbarHost = remember { SnackbarHostState() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.onAppResumed() }
+
+    LaunchedEffect(operationError) {
+        operationError?.let {
+            snackbarHost.showSnackbar(it)
+            viewModel.clearOperationError()
+        }
+    }
+    LaunchedEffect(userProfile, loadState, currentRoute) {
+        if (loadState == AppLoadState.Ready && userProfile == null &&
+            currentRoute != Screen.Splash.route && currentRoute != Screen.Onboarding.route) {
+            navController.navigate(Screen.Onboarding.route) {
+                popUpTo(navController.graph.id)
+                launchSingleTop = true
+            }
+        }
+    }
+    if (loadState is AppLoadState.Error) {
+        Column(
+            Modifier.fillMaxSize().background(NewMeBackground).padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("Local Data Unavailable", style = MaterialTheme.typography.titleLarge, color = NewMeTextPrimary)
+            Spacer(Modifier.height(12.dp))
+            Text((loadState as AppLoadState.Error).message, color = NewMeTextSecondary)
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = viewModel::retryLoading) { Text("Retry") }
+        }
+        return
+    }
 
     val showBottomBar = currentRoute in NAV_ITEMS.map { it.route }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost) },
         modifier = Modifier.fillMaxSize().background(NewMeBackground),
         contentWindowInsets = WindowInsets.systemBars,
         bottomBar = {
@@ -98,10 +136,10 @@ fun NewMeApp(
                             },
                             label = {
                                 Text(
-                                    text = screen.title.uppercase(),
+                                    text = screen.title,
                                     fontSize = 10.sp,
                                     fontWeight = if (isSelected) FontWeight.Black else FontWeight.SemiBold,
-                                    letterSpacing = 0.5.sp
+                                    letterSpacing = 0.sp
                                 )
                             },
                             colors = NavigationBarItemDefaults.colors(
@@ -131,6 +169,7 @@ fun NewMeApp(
                 composable(Screen.Splash.route) {
                     SplashScreen(
                         userProfile = userProfile,
+                        isLoading = loadState == AppLoadState.Loading,
                         onNavigateToOnboarding = {
                             navController.navigate(Screen.Onboarding.route) {
                                 popUpTo(Screen.Splash.route) { inclusive = true }
@@ -185,7 +224,10 @@ fun NewMeApp(
                     SystemScreen(
                         viewModel = viewModel,
                         onRerunOnboarding = {
-                            navController.navigate(Screen.Onboarding.route)
+                            navController.navigate(Screen.Onboarding.route) {
+                                launchSingleTop = true
+                                if (userProfile == null) popUpTo(navController.graph.id)
+                            }
                         }
                     )
                 }

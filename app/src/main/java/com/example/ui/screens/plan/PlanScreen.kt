@@ -64,7 +64,7 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                 color = NewMePrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Black,
-                letterSpacing = 1.sp
+                letterSpacing = 0.sp
             )
             Text(
                 text = "Fuel recovery, protect muscle, eliminate decision fatigue.",
@@ -78,9 +78,9 @@ fun PlanScreen(viewModel: NewMeViewModel) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(8.dp))
                     .background(NewMeSurface)
-                    .border(1.dp, NewMeBorder, RoundedCornerShape(12.dp))
+                    .border(1.dp, NewMeBorder, RoundedCornerShape(8.dp))
                     .padding(4.dp)
             ) {
                 TabButton(
@@ -117,7 +117,7 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                     item {
                         Surface(
                             color = NewMeSurface,
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, NewMeBorder),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -139,13 +139,13 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                                     Button(
                                         onClick = { showQuickProteinDialog = true },
                                         colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                                        shape = RoundedCornerShape(10.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                         modifier = Modifier.testTag("add_protein_from_plan")
                                     ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF1A0E00), modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = NewMePrimaryDark, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("LOG FOOD", color = Color(0xFF1A0E00), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("LOG FOOD", color = NewMePrimaryDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
 
@@ -172,8 +172,8 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                     if (userProfile?.usesRecommendedPlan == true) {
                         item {
                             Surface(
-                                color = Color(0xFF0D1C17),
-                                shape = RoundedCornerShape(14.dp),
+                                color = NewMeSurfaceVariant,
+                                shape = RoundedCornerShape(8.dp),
                                 border = BorderStroke(1.dp, NewMeTertiary.copy(alpha = 0.5f)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -186,7 +186,7 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                                             color = NewMeTertiary,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Black,
-                                            letterSpacing = 1.sp
+                                            letterSpacing = 0.sp
                                         )
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
@@ -224,7 +224,7 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                         item {
                             Surface(
                                 color = NewMeSurface,
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 border = BorderStroke(1.dp, NewMeBorder),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -244,7 +244,7 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                                     Button(
                                         onClick = { viewModel.applyIndianFoundationMeals() },
                                         colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                                        shape = RoundedCornerShape(10.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.testTag("apply_foundation_meals_button")
                                     ) {
                                         Text("LOAD INDIAN FOUNDATION MEALS", color = NewMePrimaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -278,8 +278,8 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                 ) {
                     item {
                         Surface(
-                            color = Color(0xFF0F1E19),
-                            shape = RoundedCornerShape(16.dp),
+                            color = NewMeSurfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, NewMeTertiary.copy(alpha = 0.5f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -290,19 +290,19 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column {
-                                        Text("READY TO EAT", color = NewMeTertiary, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                                        Text("READY TO EAT", color = NewMeTertiary, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = 0.sp)
                                         Text("Fridge Portions Prepared", color = NewMeTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                     }
                                     Button(
                                         onClick = { showAddPrepDialog = true },
                                         colors = ButtonDefaults.buttonColors(containerColor = NewMeTertiary),
-                                        shape = RoundedCornerShape(10.dp),
+                                        shape = RoundedCornerShape(8.dp),
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                         modifier = Modifier.testTag("add_prep_button")
                                     ) {
-                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF003824), modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = NewMePrimaryDark, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("PREP FOOD", color = Color(0xFF003824), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("PREP FOOD", color = NewMePrimaryDark, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -320,7 +320,7 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(NewMeSurface)
                                     .padding(32.dp),
                                 contentAlignment = Alignment.Center
@@ -335,7 +335,7 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                                         onClick = { showAddPrepDialog = true },
                                         colors = ButtonDefaults.buttonColors(containerColor = NewMeTertiary)
                                     ) {
-                                        Text("ADD FIRST PREPPED FOOD", color = Color(0xFF003824), fontWeight = FontWeight.Bold)
+                                        Text("ADD FIRST PREPPED FOOD", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -364,13 +364,13 @@ fun PlanScreen(viewModel: NewMeViewModel) {
                     // Safety Disclaimer (Section 15, 30)
                     item {
                         Surface(
-                            color = Color(0xFF1F1A14),
-                            shape = RoundedCornerShape(12.dp),
+                            color = NewMeSurfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, Color(0xFFD97706).copy(alpha = 0.5f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-                                Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Info, contentDescription = null, tint = NewMeTertiary, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     "Supplements should not replace a balanced diet or professional medical advice. Always discuss with a qualified healthcare professional.",
@@ -497,8 +497,8 @@ private fun MealCard(
     onDelete: () -> Unit
 ) {
     Surface(
-        color = if (meal.isCompleted) Color(0xFF0D1C17) else NewMeSurface,
-        shape = RoundedCornerShape(14.dp),
+        color = if (meal.isCompleted) NewMeSurfaceVariant else NewMeSurface,
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, if (meal.isCompleted) NewMeTertiary.copy(alpha = 0.4f) else NewMeBorder),
         modifier = Modifier.fillMaxWidth().testTag("meal_card_${meal.id}")
     ) {
@@ -515,13 +515,13 @@ private fun MealCard(
                         colors = CheckboxDefaults.colors(
                             checkedColor = NewMeTertiary,
                             uncheckedColor = NewMeTextSecondary,
-                            checkmarkColor = Color(0xFF003824)
+                            checkmarkColor = NewMePrimaryDark
                         ),
                         modifier = Modifier.size(24.dp).testTag("meal_checkbox_${meal.id}")
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
-                        Text(meal.slot.uppercase(), color = NewMePrimary, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp)
+                        Text(meal.slot.uppercase(), color = NewMePrimary, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 0.sp)
                         Text(meal.name, color = NewMeTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -549,7 +549,7 @@ private fun MealCard(
             ) {
                 MacroTag(label = "PROTEIN", value = "${meal.proteinGrams}g", color = NewMePrimary)
                 MacroTag(label = "CARBS", value = "${meal.carbsGrams}g", color = NewMeSecondary)
-                MacroTag(label = "FATS", value = "${meal.fatsGrams}g", color = Color(0xFFFBBF24))
+                MacroTag(label = "FATS", value = "${meal.fatsGrams}g", color = NewMeTertiary)
                 MacroTag(label = "CALORIES", value = "~${meal.approxCalories} kcal", color = NewMeTextSecondary)
             }
         }
@@ -572,7 +572,7 @@ private fun MealPrepCard(
 ) {
     Surface(
         color = NewMeSurface,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, NewMeBorder),
         modifier = Modifier.fillMaxWidth().testTag("prep_card_${item.id}")
     ) {
@@ -603,7 +603,7 @@ private fun MealPrepCard(
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     modifier = Modifier.testTag("consume_portion_${item.id}")
                 ) {
-                    Text("EAT 1", color = Color(0xFF003824), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("EAT 1", color = NewMePrimaryDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
                 IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = NewMeTextMuted, modifier = Modifier.size(16.dp))
@@ -621,8 +621,8 @@ private fun SupplementCard(
     onDelete: () -> Unit
 ) {
     Surface(
-        color = if (isTaken) Color(0xFF0F1E19) else NewMeSurface,
-        shape = RoundedCornerShape(14.dp),
+        color = if (isTaken) NewMeSurfaceVariant else NewMeSurface,
+        shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, if (isTaken) NewMeTertiary.copy(alpha = 0.5f) else NewMeBorder),
         modifier = Modifier.fillMaxWidth().testTag("supp_card_${supplement.id}")
     ) {
@@ -635,7 +635,7 @@ private fun SupplementCard(
                 Checkbox(
                     checked = isTaken,
                     onCheckedChange = { onToggleTaken() },
-                    colors = CheckboxDefaults.colors(checkedColor = NewMeTertiary, checkmarkColor = Color(0xFF003824))
+                    colors = CheckboxDefaults.colors(checkedColor = NewMeTertiary, checkmarkColor = NewMePrimaryDark)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
@@ -687,7 +687,7 @@ private fun MealEditDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp)
         ) {
@@ -771,7 +771,7 @@ private fun MealEditDialog(
                         colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
                         modifier = Modifier.weight(1.5f)
                     ) {
-                        Text("Save Meal", color = Color(0xFF1A0E00), fontWeight = FontWeight.Bold)
+                        Text("Save Meal", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -791,7 +791,7 @@ private fun AddMealPrepDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp)
         ) {
@@ -841,9 +841,9 @@ private fun AddMealPrepDialog(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMeTertiary),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 ) {
-                    Text("ADD TO FRIDGE", color = Color(0xFF003824), fontWeight = FontWeight.Bold)
+                    Text("ADD TO FRIDGE", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -863,7 +863,7 @@ private fun AddSupplementDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(8.dp),
             color = NewMeSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(8.dp)
         ) {
@@ -912,9 +912,9 @@ private fun AddSupplementDialog(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NewMePrimary),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 ) {
-                    Text("SAVE SUPPLEMENT", color = Color(0xFF1A0E00), fontWeight = FontWeight.Bold)
+                    Text("SAVE SUPPLEMENT", color = NewMePrimaryDark, fontWeight = FontWeight.Bold)
                 }
             }
         }
