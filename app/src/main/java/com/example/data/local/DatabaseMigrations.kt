@@ -38,4 +38,13 @@ object DatabaseMigrations {
             db.execSQL("CREATE INDEX IF NOT EXISTS index_route_points_sessionKey ON route_points(sessionKey)")
         }
     }
+
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS reminders (`key` TEXT NOT NULL, kind TEXT NOT NULL, taskId INTEGER, minuteOfDay INTEGER NOT NULL, enabled INTEGER NOT NULL, timeSensitive INTEGER NOT NULL, lastDeliveredToken TEXT NOT NULL, PRIMARY KEY(`key`), FOREIGN KEY(taskId) REFERENCES daily_checklist(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_reminders_taskId ON reminders(taskId)")
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_4_5, MIGRATION_5_6)
 }

@@ -156,6 +156,32 @@ class ActivityTrackingRepository(
         dao.deleteTrack(track.sessionKey)
     }
 
+    suspend fun correctDistance(key: String, kilometers: Double) = database.withTransaction {
+        require(kilometers.isFinite() && kilometers in 0.0..1000.0) { "Enter a distance between 0 and 1000 km." }
+        val track = checkNotNull(dao.getTrack(key)) { "This tracked session no longer exists." }
+        check(track.status == TrackingPhase.FINISHED.name && dao.getActive()?.sessionKey != key) { "Stop and save the session before correcting distance." }
+        val meters = kilometers * 1000.0
+        val days = dao.getDays(key)
+        check(days.isNotEmpty() || meters == 0.0) { "This session has no saved time to associate with a distance." }
+        val measured = days.sumOf { it.distanceMeters }
+        val elapsed = days.sumOf { it.elapsedMillis }.toDouble()
+        var remaining = meters
+        days.forEachIndexed { index, day ->
+            val weight = when {
+                measured > 0 -> day.distanceMeters / measured
+                elapsed > 0 -> day.elapsedMillis / elapsed
+                else -> 1.0 / days.size
+            }
+            val distance = if (index == days.lastIndex) remaining else (meters * weight).coerceIn(0.0, remaining)
+            remaining = (remaining - distance).coerceAtLeast(0.0)
+            dao.saveDay(day.copy(distanceMeters = distance))
+            database.activitySessionDao().getSessionByKey("$key:${day.date}")?.let { summary ->
+                database.activitySessionDao().updateActivitySession(summary.copy(distanceKm = (distance / 1000.0).toFloat()))
+            }
+        }
+        dao.updateTrack(track.copy(distanceMeters = meters))
+    }
+
     suspend fun deleteRoute(key: String) = database.withTransaction {
         require(dao.getTrack(key)?.status != TrackingPhase.RUNNING.name) { "Pause or finish the session before deleting route points." }
         dao.deleteRoute(key)

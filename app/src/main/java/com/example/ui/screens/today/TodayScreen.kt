@@ -52,6 +52,7 @@ fun TodayScreen(
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val levelInfo by viewModel.levelInfo.collectAsStateWithLifecycle()
     val checklist by viewModel.checklist.collectAsStateWithLifecycle()
+    val reminderSchedules by viewModel.reminders.collectAsStateWithLifecycle()
     val disciplineScore by viewModel.disciplineScore.collectAsStateWithLifecycle()
     val totalProtein by viewModel.totalProteinLogged.collectAsStateWithLifecycle()
     val waterLog by viewModel.waterLog.collectAsStateWithLifecycle()
@@ -83,12 +84,13 @@ fun TodayScreen(
     var showActivityDialog by remember { mutableStateOf(false) }
     var showFirstMorningWelcome by remember { mutableStateOf(false) }
     var showDetailedCheckin by rememberSaveable { mutableStateOf(false) }
+    var reminderTask by remember { mutableStateOf<DailyChecklistItemEntity?>(null) }
+    reminderTask?.let { TaskReminderDialog(viewModel, it) { reminderTask = null } }
 
     // Check if user should see first morning welcome
     LaunchedEffect(userProfile, selectedDate) {
-        if (userProfile?.isOnboarded == true && !userProfile!!.hasSeenFirstMorningWelcome && selectedDate == LocalDate.now().toString()) {
-            showFirstMorningWelcome = true
-        }
+        showFirstMorningWelcome = userProfile?.isOnboarded == true &&
+            userProfile?.hasSeenFirstMorningWelcome == false && selectedDate == LocalDate.now().toString()
     }
 
     val userCode = userProfile?.friendCode?.ifBlank {
@@ -707,7 +709,9 @@ fun TodayScreen(
                 items(itemsForSection, key = { it.id }) { item ->
                     ChecklistItemCard(
                         item = item,
-                        onToggle = { viewModel.toggleChecklistItem(item) }
+                        onToggle = { viewModel.toggleChecklistItem(item) },
+                        onReminder = { reminderTask = item },
+                        reminderEnabled = reminderSchedules.any { it.taskId == item.id && it.enabled }
                     )
                 }
             }
@@ -1191,7 +1195,9 @@ fun ChecklistSectionHeader(title: String, subtitle: String) {
 @Composable
 fun ChecklistItemCard(
     item: DailyChecklistItemEntity,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    onReminder: (() -> Unit)? = null,
+    reminderEnabled: Boolean = false
 ) {
     Surface(
         color = if (item.isCompleted) NewMeSurfaceDarker else NewMeSurface,
@@ -1235,7 +1241,12 @@ fun ChecklistItemCard(
                 )
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            onReminder?.let { action ->
+                IconButton(onClick = action, enabled = !item.isCompleted) {
+                    Icon(if (reminderEnabled) Icons.Default.NotificationsActive else Icons.Default.NotificationsNone,
+                        contentDescription = "Task reminder")
+                }
+            }
 
             Surface(
                 color = if (item.isCompleted) NewMePrimary.copy(alpha = 0.15f) else NewMeSurfaceDarker,

@@ -38,9 +38,10 @@ import com.example.data.local.entity.*
         ActivityTrackEntity::class,
         ActiveTrackingEntity::class,
         TrackingDayTotalEntity::class,
-        RoutePointEntity::class
+        RoutePointEntity::class,
+        ReminderEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class NewMeDatabase : RoomDatabase() {
@@ -66,6 +67,7 @@ abstract class NewMeDatabase : RoomDatabase() {
     abstract fun rewardDao(): RewardDao
     abstract fun cycleDao(): CycleDao
     abstract fun activityTrackingDao(): ActivityTrackingDao
+    abstract fun reminderDao(): ReminderDao
 
     companion object {
         @Volatile
@@ -78,7 +80,7 @@ abstract class NewMeDatabase : RoomDatabase() {
                     NewMeDatabase::class.java,
                     "newme_master.db"
                 )
-                    .addMigrations(DatabaseMigrations.MIGRATION_4_5)
+                    .addMigrations(*DatabaseMigrations.ALL)
                     .build()
                 INSTANCE = instance
                 instance

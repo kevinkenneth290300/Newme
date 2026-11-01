@@ -13,8 +13,8 @@ android {
     applicationId = "com.aistudio.newme.trkfit"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "1.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -46,6 +46,7 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+  sourceSets.getByName("main").assets.directories.add("$projectDir/schemas")
   sourceSets.getByName("androidTest").assets.directories.add("$projectDir/schemas")
   sourceSets.getByName("test").resources.srcDir("$projectDir/schemas")
   dependenciesInfo {
@@ -55,6 +56,9 @@ android {
 }
 
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+
+tasks.matching { it.name == "mergeDebugAssets" }.configureEach { dependsOn("kspDebugKotlin") }
+tasks.matching { it.name == "mergeReleaseAssets" }.configureEach { dependsOn("kspReleaseKotlin") }
 
 val verifyReleaseSigning by tasks.registering {
   doLast {

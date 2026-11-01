@@ -197,7 +197,7 @@ class ExampleRobolectricTest {
       db.sleepDao().insertOrUpdateSleepLog(SleepLogEntity("2020-01-01", durationMinutes = 420))
       db.dailyCheckinDao().insertOrUpdateCheckin(DailyCheckinEntity(date = "2020-01-01", timeOfDay = "EVENING", mattersMost = "Synthetic intention"))
       db.activitySessionDao().insertActivitySession(ActivitySessionEntity(date = "2020-01-01", activityType = "Cycling", title = "Synthetic ride", durationMinutes = 20))
-      val store = BackupStore(db)
+      val store = BackupStore(db, context)
       val password = "synthetic-test-password".toCharArray()
       val encrypted = store.export(password)
       val prepared = store.prepare(encrypted, password)
@@ -221,7 +221,7 @@ class ExampleRobolectricTest {
       val repo = NewMeRepository(db)
       repo.completeOnboarding(UserProfileEntity(name = "Synthetic User"))
       val original = db.userProfileDao().getUserProfileDirect()
-      val store = BackupStore(db)
+      val store = BackupStore(db, context)
       val password = "synthetic-test-password".toCharArray()
       val encrypted = store.export(password)
       store.prepare(encrypted, password)
@@ -297,18 +297,52 @@ class ExampleRobolectricTest {
       val table = entities.getJSONObject(index).getString("tableName")
       table to snapshotRows(helper.writableDatabase, table)
     }
+    val legacyTables = org.json.JSONArray()
+    for (index in 0 until entities.length()) {
+      val table = entities.getJSONObject(index).getString("tableName")
+      val rows = org.json.JSONArray()
+      helper.writableDatabase.query("SELECT * FROM `$table` ORDER BY rowid").use { cursor ->
+        while (cursor.moveToNext()) {
+          val row = org.json.JSONArray()
+          for (column in 0 until cursor.columnCount) {
+            row.put(org.json.JSONArray().put(cursor.getType(column))
+              .put(if (cursor.isNull(column)) JSONObject.NULL else cursor.getString(column)))
+          }
+          rows.put(row)
+        }
+        legacyTables.put(JSONObject().put("name", table).put("columns", org.json.JSONArray(cursor.columnNames.toList())).put("rows", rows))
+      }
+    }
+    val legacyJson = JSONObject().put("format", 1).put("schemaVersion", 4)
+      .put("identityHash", schema.getString("identityHash")).put("tables", legacyTables)
+    val cipher = com.example.data.backup.BackupCipher()
+    val password = "synthetic-test-password".toCharArray()
+    val encrypted = cipher.encrypt(legacyJson.toString().toByteArray(Charsets.UTF_8), password)
     helper.close()
     val db = androidx.room.Room.databaseBuilder(context, NewMeDatabase::class.java, name)
-      .addMigrations(DatabaseMigrations.MIGRATION_4_5).allowMainThreadQueries().build()
+      .addMigrations(*DatabaseMigrations.ALL).allowMainThreadQueries().build()
     try {
       val sql = db.openHelper.writableDatabase
-      assertEquals(5, sql.version)
+      assertEquals(6, sql.version)
       for ((table, rows) in before) assertEquals("Changed records in $table", rows, snapshotRows(sql, table))
       assertEquals(1240, db.userProfileDao().getUserProfileDirect()?.currentXp)
       assertEquals(4, db.userProfileDao().getUserProfileDirect()?.currentStreak)
       assertEquals(0, db.rewardDao().count())
       assertTrue(db.rewardDao().isExcluded("task:1"))
       assertEquals(false, db.dailyStateDao().get("2020-01-01")?.targetsKnown)
+      val store = BackupStore(db, context)
+      val prepared = store.prepare(encrypted, password)
+      assertEquals(sql.version, prepared.schemaVersion)
+      for ((table, rows) in before) assertEquals(rows, snapshotRows(sql, table))
+      legacyJson.put("schemaVersion", 3)
+      val unsupported = cipher.encrypt(legacyJson.toString().toByteArray(Charsets.UTF_8), password)
+      org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+        runBlocking { store.prepare(unsupported, password) }
+      }
+      for ((table, rows) in before) assertEquals(rows, snapshotRows(sql, table))
+      NewMeRepository(db).resetAllData()
+      store.restore(prepared)
+      for ((table, rows) in before) assertEquals("Restore changed records in $table", rows, snapshotRows(sql, table))
     } finally {
       db.close()
       context.deleteDatabase(name)
@@ -333,6 +367,46 @@ class ExampleRobolectricTest {
       assertTrue(db.dailyChecklistDao().getChecklistForDateDirect(date).isEmpty())
       assertTrue(db.nutritionDao().getMealsForDateDirect(date).isEmpty())
       org.junit.Assert.assertNotNull(db.dailyStateDao().get(date))
+    } finally {
+      db.close()
+    }
+  }
+
+  @Test
+  fun `authenticated backup with broken route relationship is rejected before confirmation`() = runBlocking<Unit> {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(context, NewMeDatabase::class.java)
+      .allowMainThreadQueries().build()
+    try {
+      val repo = NewMeRepository(db)
+      repo.completeOnboarding(UserProfileEntity(name = "Existing User"))
+      val original = db.userProfileDao().getUserProfileDirect()
+      val store = BackupStore(db, context)
+      val cipher = com.example.data.backup.BackupCipher()
+      val password = "synthetic-test-password".toCharArray()
+      val json = JSONObject(cipher.decrypt(store.export(password), password).toString(Charsets.UTF_8))
+      val tables = json.getJSONArray("tables")
+      val route = (0 until tables.length()).map { tables.getJSONObject(it) }
+        .first { it.getString("name") == "route_points" }
+      val values = mapOf<String, Any>("id" to 1L, "sessionKey" to "missing-session", "epochMillis" to 1L,
+        "latitude" to 10.0, "longitude" to 20.0, "accuracyMeters" to 5.0, "segment" to 0L)
+      val columns = route.getJSONArray("columns")
+      val row = org.json.JSONArray()
+      for (index in 0 until columns.length()) {
+        val value = values.getValue(columns.getString(index))
+        val type = when (value) {
+          is Long -> android.database.Cursor.FIELD_TYPE_INTEGER
+          is Double -> android.database.Cursor.FIELD_TYPE_FLOAT
+          else -> android.database.Cursor.FIELD_TYPE_STRING
+        }
+        row.put(org.json.JSONArray().put(type).put(value.toString()))
+      }
+      route.getJSONArray("rows").put(row)
+      val damaged = cipher.encrypt(json.toString().toByteArray(Charsets.UTF_8), password)
+      org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+        runBlocking { store.prepare(damaged, password) }
+      }
+      assertEquals(original, db.userProfileDao().getUserProfileDirect())
     } finally {
       db.close()
     }
@@ -554,11 +628,14 @@ class ExampleRobolectricTest {
       cycle.save(CycleEntryEntity(startDate = "2020-01-01", endDate = "2020-01-05", symptoms = "Synthetic optional symptom"))
       cycle.save(CycleEntryEntity(startDate = "2020-01-01", endDate = "2020-01-06", symptoms = "Edited synthetic symptom"))
       assertEquals(1, db.cycleDao().getAll().size)
+      assertEquals(db.cycleDao().getAll(), cycle.entries.first())
       cycle.enabled(false)
       assertEquals(1, db.cycleDao().getAll().size)
+      assertTrue(cycle.entries.first().isEmpty())
+      assertTrue(CycleRepository(db).entries.first().isEmpty())
       assertFalse(db.settingsDao().get()!!.cycleRemindersEnabled)
       val expected = db.cycleDao().getAll()
-      val store = BackupStore(db)
+      val store = BackupStore(db, context)
       val password = "synthetic-test-password".toCharArray()
       val prepared = store.prepare(store.export(password), password)
       repo.resetAllData()
@@ -566,6 +643,9 @@ class ExampleRobolectricTest {
       store.restore(prepared)
       assertEquals(expected, db.cycleDao().getAll())
       assertFalse(db.settingsDao().get()!!.cycleRemindersEnabled)
+      assertTrue(cycle.entries.first().isEmpty())
+      cycle.enabled(true)
+      assertEquals(expected, cycle.entries.first())
       cycle.delete(expected.first())
       assertTrue(db.cycleDao().getAll().isEmpty())
     } finally {
@@ -626,7 +706,7 @@ class ExampleRobolectricTest {
       elapsed += 100_000; tracker.tick()
       assertEquals("PAUSED", db.activityTrackingDao().getActive()?.status)
       assertEquals(5000L, db.activityTrackingDao().getActive()?.elapsedMillis)
-      val backup = BackupStore(db)
+      val backup = BackupStore(db, context)
       val password = "synthetic-test-password".toCharArray()
       val prepared = backup.prepare(backup.export(password), password)
       backup.restore(prepared)
@@ -659,7 +739,7 @@ class ExampleRobolectricTest {
       tracker.pause()
       val original = db.activityTrackingDao().observeRoute(track.sessionKey).first()
       assertEquals(2, original.size)
-      val backup = BackupStore(db)
+      val backup = BackupStore(db, context)
       val password = "synthetic-test-password".toCharArray()
       val prepared = backup.prepare(backup.export(password), password)
       tracker.discard()
@@ -679,6 +759,248 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     assertFalse(ActivityTrackingService.hasStepAccess(context))
     assertFalse(ActivityTrackingService.canUseGps(context))
+  }
+
+  @Test
+  @Config(sdk = [34])
+  fun `reminder timing handles notification denial exact access changes and discreet text`() {
+    val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+    assertEquals(com.example.data.reminder.ReminderTiming.BLOCKED,
+      com.example.data.reminder.ReminderScheduler.timing(context, true))
+    org.robolectric.Shadows.shadowOf(context).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+    org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(false)
+    assertEquals(com.example.data.reminder.ReminderTiming.APPROXIMATE,
+      com.example.data.reminder.ReminderScheduler.timing(context, true))
+    org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(true)
+    assertEquals(com.example.data.reminder.ReminderTiming.EXACT,
+      com.example.data.reminder.ReminderScheduler.timing(context, true))
+    assertEquals(com.example.data.reminder.ReminderTiming.APPROXIMATE,
+      com.example.data.reminder.ReminderScheduler.timing(context, false))
+    org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(false)
+    assertEquals(com.example.data.reminder.ReminderTiming.APPROXIMATE,
+      com.example.data.reminder.ReminderScheduler.timing(context, true))
+    val scheduler = com.example.data.reminder.ReminderScheduler.from(context)
+    val notification = scheduler.notification("cycle")
+    val text = notification.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString()
+    assertFalse(text.contains("cycle", true))
+    assertFalse(text.contains("period", true))
+    assertFalse(text.contains("2020"))
+    assertEquals(android.app.Notification.VISIBILITY_PRIVATE, notification.visibility)
+    org.robolectric.Shadows.shadowOf(context).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+    assertEquals(com.example.data.reminder.ReminderTiming.BLOCKED,
+      com.example.data.reminder.ReminderScheduler.timing(context, false))
+  }
+
+  @Test
+  fun `manual distance correction updates one midnight spanning session without duplicate progress`() = runBlocking<Unit> {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(context, NewMeDatabase::class.java).allowMainThreadQueries().build()
+    try {
+      var instant = java.time.Instant.parse("2020-01-10T23:59:00Z")
+      val clock = object : java.time.Clock() {
+        override fun getZone() = java.time.ZoneOffset.UTC
+        override fun withZone(zone: java.time.ZoneId) = java.time.Clock.fixed(instant, zone)
+        override fun instant() = instant
+      }
+      val repo = NewMeRepository(db, clock)
+      repo.completeOnboarding(UserProfileEntity(name = "Synthetic User"), OnboardingPreferences(DailyGoalKind.ACTIVITY_MINUTES, 1))
+      var elapsed = 1000L
+      val tracker = ActivityTrackingRepository(db, clock) { elapsed }
+      val track = tracker.start(ActivityKind.WALKING, false)
+      org.junit.Assert.assertThrows(IllegalStateException::class.java) { runBlocking { tracker.correctDistance(track.sessionKey, 6.0) } }
+      repeat(6) { elapsed += 20_000; instant = instant.plusSeconds(20); tracker.tick() }
+      tracker.steps(5000.0)
+      tracker.steps(5004.0)
+      val finished = tracker.finish()!!
+      val beforeDays = db.activityTrackingDao().getDays(track.sessionKey)
+      val summaries = beforeDays.flatMap { db.activitySessionDao().getActivitySessionsForDateDirect(it.date) }
+      val profile = db.userProfileDao().getUserProfileDirect()!!
+      repeat(3) { tracker.correctDistance(track.sessionKey, 6.0) }
+      assertEquals(finished.copy(distanceMeters = 6000.0), db.activityTrackingDao().getTrack(track.sessionKey))
+      val afterDays = db.activityTrackingDao().getDays(track.sessionKey)
+      assertEquals(6000.0, afterDays.sumOf { it.distanceMeters }, 0.001)
+      assertEquals(beforeDays.map { it.elapsedMillis }, afterDays.map { it.elapsedMillis })
+      assertEquals(beforeDays.map { it.steps }, afterDays.map { it.steps })
+      val corrected = afterDays.flatMap { db.activitySessionDao().getActivitySessionsForDateDirect(it.date) }
+      assertEquals(summaries.map { it.id }, corrected.map { it.id })
+      assertEquals(summaries.map { it.durationMinutes }, corrected.map { it.durationMinutes })
+      assertEquals(6.0, corrected.sumOf { it.distanceKm.toDouble() }, 0.001)
+      assertEquals(profile.currentXp, db.userProfileDao().getUserProfileDirect()?.currentXp)
+      assertEquals(profile.currentStreak, db.userProfileDao().getUserProfileDirect()?.currentStreak)
+      assertEquals(1, db.rewardDao().countMatching("tracked-session:%"))
+      org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { runBlocking { tracker.correctDistance(track.sessionKey, Double.NaN) } }
+      org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { runBlocking { tracker.correctDistance(track.sessionKey, -1.0) } }
+      assertEquals(6000.0, db.activityTrackingDao().getTrack(track.sessionKey)!!.distanceMeters, 0.001)
+    } finally { db.close() }
+  }
+
+  @Test
+  @Config(sdk = [34])
+  fun `reminder reconciliation deduplicates delivery and cancels completed or deleted tasks`() = runBlocking<Unit> {
+    val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+    org.robolectric.Shadows.shadowOf(context).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(context, NewMeDatabase::class.java).allowMainThreadQueries().build()
+    try {
+      val clock = java.time.Clock.fixed(java.time.Instant.parse("2020-01-10T12:00:00Z"), java.time.ZoneOffset.UTC)
+      val repo = NewMeRepository(db, clock)
+      repo.completeOnboarding(UserProfileEntity(name = "Synthetic User"))
+      val reminders = com.example.data.reminder.ReminderRepository(db, clock)
+      val scheduler = com.example.data.reminder.ReminderScheduler(context, db, clock)
+      val alarms = org.robolectric.Shadows.shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+      reminders.setTaskEnabled(true)
+      scheduler.reconcile()
+      scheduler.reconcile()
+      assertEquals(1, alarms.scheduledAlarms.size)
+      assertTrue(alarms.scheduledAlarms.single().windowLengthMs != 0L)
+      scheduler.deliver("daily", "2020-01-10")
+      val manager = org.robolectric.Shadows.shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+      assertEquals(1, manager.allNotifications.size)
+      scheduler.deliver("daily", "2020-01-10")
+      assertEquals(1, manager.allNotifications.size)
+      assertEquals("2020-01-10", db.reminderDao().get("daily")!!.lastDeliveredToken)
+      val task = db.dailyChecklistDao().getChecklistForDateDirect("2020-01-10").first()
+      reminders.save("task:${task.id}", 13 * 60, true, true, task.id)
+      org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(true)
+      scheduler.reconcile()
+      assertEquals(2, alarms.scheduledAlarms.size)
+      assertEquals(0L, alarms.scheduledAlarms.first().windowLengthMs)
+      db.dailyChecklistDao().setCompleted(task.id, true, "12:00")
+      scheduler.reconcile()
+      assertEquals(1, alarms.scheduledAlarms.size)
+      db.dailyChecklistDao().deleteItem(task)
+      assertTrue(db.reminderDao().getAll().none { it.taskId == task.id })
+      reminders.setTaskEnabled(false)
+      scheduler.reconcile()
+      assertTrue(alarms.scheduledAlarms.isEmpty())
+      assertTrue(manager.allNotifications.isEmpty())
+    } finally { db.close() }
+  }
+
+  @Test
+  @Config(sdk = [34])
+  fun `restore reschedules task reminders while cycle consent and reset cancel private alarms`() = runBlocking<Unit> {
+    val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+    org.robolectric.Shadows.shadowOf(context).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(context, NewMeDatabase::class.java).allowMainThreadQueries().build()
+    try {
+      val clock = java.time.Clock.fixed(java.time.Instant.parse("2020-03-01T08:00:00Z"), java.time.ZoneOffset.UTC)
+      val repo = NewMeRepository(db, clock)
+      repo.completeOnboarding(UserProfileEntity(name = "Synthetic User", sex = "Female"), OnboardingPreferences(DailyGoalKind.TASKS, 3, cycleEnabled = true))
+      val cycle = CycleRepository(db, clock)
+      for (date in listOf("2020-01-01", "2020-01-29", "2020-02-26")) cycle.save(CycleEntryEntity(startDate = date))
+      val reminders = com.example.data.reminder.ReminderRepository(db, clock)
+      val scheduler = com.example.data.reminder.ReminderScheduler(context, db, clock)
+      val alarms = org.robolectric.Shadows.shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+      assertFalse(db.settingsDao().get()!!.cycleRemindersEnabled)
+      reminders.setTaskEnabled(true)
+      reminders.setCycleEnabled(true)
+      scheduler.reconcile()
+      scheduler.reconcile()
+      assertEquals(2, alarms.scheduledAlarms.size)
+      val store = BackupStore(db, context)
+      val password = "synthetic-test-password".toCharArray()
+      val prepared = store.prepare(store.export(password), password)
+      repo.resetAllData()
+      scheduler.reconcile()
+      assertTrue(alarms.scheduledAlarms.isEmpty())
+      store.restore(prepared)
+      scheduler.reconcile()
+      assertEquals(1, alarms.scheduledAlarms.size)
+      assertFalse(db.settingsDao().get()!!.cycleRemindersEnabled)
+      reminders.setCycleEnabled(true)
+      scheduler.reconcile()
+      assertEquals(2, alarms.scheduledAlarms.size)
+      cycle.enabled(false)
+      scheduler.reconcile()
+      assertEquals(1, alarms.scheduledAlarms.size)
+      org.robolectric.Shadows.shadowOf(context).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+      scheduler.reconcile()
+      assertTrue(alarms.scheduledAlarms.isEmpty())
+    } finally { db.close() }
+  }
+
+  @Test
+  fun `failed restore write rolls back every live table and version five backup still upgrades`() = runBlocking<Unit> {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(context, NewMeDatabase::class.java).allowMainThreadQueries().build()
+    try {
+      val repo = NewMeRepository(db)
+      repo.completeOnboarding(UserProfileEntity(name = "Existing User"))
+      db.waterDao().insertOrUpdateWaterLog(WaterLogEntity("2020-01-01", 1234))
+      db.cycleDao().insert(CycleEntryEntity(startDate = "2020-01-01", symptoms = "Synthetic optional symptom"))
+      val store = BackupStore(db, context)
+      val cipher = com.example.data.backup.BackupCipher()
+      val password = "synthetic-test-password".toCharArray()
+      val prepared = store.prepare(store.export(password), password)
+      val sql = db.openHelper.writableDatabase
+      sql.execSQL("CREATE TEMP TRIGGER interrupt_restore BEFORE INSERT ON water_logs BEGIN SELECT RAISE(ABORT, 'synthetic interrupted write'); END")
+      org.junit.Assert.assertThrows(android.database.sqlite.SQLiteException::class.java) { runBlocking { store.restore(prepared) } }
+      sql.execSQL("DROP TRIGGER interrupt_restore")
+      assertEquals(prepared.tables, store.prepare(store.export(password), password).tables)
+      val json = JSONObject(cipher.decrypt(store.export(password), password).toString(Charsets.UTF_8))
+      val tables = json.getJSONArray("tables")
+      val legacyTables = org.json.JSONArray()
+      for (index in 0 until tables.length()) {
+        val table = tables.getJSONObject(index)
+        if (table.getString("name") != "reminders") legacyTables.put(table)
+      }
+      val schema = context.assets.open("com.example.data.local.NewMeDatabase/5.json")
+        .bufferedReader().use { JSONObject(it.readText()).getJSONObject("database") }
+      json.put("tables", legacyTables).put("schemaVersion", 5).put("identityHash", schema.getString("identityHash"))
+      val older = cipher.encrypt(json.toString().toByteArray(Charsets.UTF_8), password)
+      val migrated = store.prepare(older, password)
+      assertEquals(6, migrated.schemaVersion)
+      repo.resetAllData()
+      store.restore(migrated)
+      assertEquals("Existing User", db.userProfileDao().getUserProfileDirect()?.name)
+      assertEquals(1234, db.waterDao().getLog("2020-01-01")?.amountMl)
+      assertEquals(1, db.cycleDao().getAll().size)
+      assertTrue(context.noBackupFilesDir.listFiles().orEmpty().none { it.name.startsWith("newme-restore-") })
+    } finally { db.close() }
+  }
+
+  @Test
+  @Config(sdk = [24, 25])
+  fun `legacy Android supports backup restore and approximate reminder scheduling`() = runBlocking<Unit> {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(context, NewMeDatabase::class.java).allowMainThreadQueries().build()
+    try {
+      val clock = java.time.Clock.fixed(java.time.Instant.parse("2020-01-10T08:00:00Z"), java.time.ZoneOffset.UTC)
+      NewMeRepository(db, clock).completeOnboarding(UserProfileEntity(name = "Synthetic User"))
+      com.example.data.reminder.ReminderRepository(db, clock).setTaskEnabled(true)
+      com.example.data.reminder.ReminderScheduler(context, db, clock).reconcile()
+      assertEquals(1, org.robolectric.Shadows.shadowOf(context.getSystemService(android.app.AlarmManager::class.java)).scheduledAlarms.size)
+      val store = BackupStore(db, context)
+      val password = "synthetic-test-password".toCharArray()
+      val prepared = store.prepare(store.export(password), password)
+      store.restore(prepared)
+      assertEquals("Synthetic User", db.userProfileDao().getUserProfileDirect()?.name)
+    } finally { db.close() }
+  }
+
+  @Test
+  @Config(sdk = [34])
+  fun `boot clock timezone and app update receivers reconcile one local alarm`() = runBlocking<Unit> {
+    val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+    org.robolectric.Shadows.shadowOf(context).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+    val db = NewMeDatabase.getInstance(context)
+    val repo = NewMeRepository(db)
+    repo.resetAllData()
+    repo.completeOnboarding(UserProfileEntity(name = "Synthetic User"))
+    com.example.data.reminder.ReminderRepository(db).setTaskEnabled(true)
+    val scheduler = com.example.data.reminder.ReminderScheduler.from(context)
+    scheduler.reconcile()
+    val alarms = org.robolectric.Shadows.shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+    for (action in listOf(android.content.Intent.ACTION_BOOT_COMPLETED, android.content.Intent.ACTION_TIME_CHANGED,
+        android.content.Intent.ACTION_TIMEZONE_CHANGED, android.content.Intent.ACTION_MY_PACKAGE_REPLACED)) {
+      context.sendBroadcast(android.content.Intent(action).setClass(context, com.example.data.reminder.ReminderReceiver::class.java))
+      org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+      scheduler.reconcile()
+      assertEquals(1, alarms.scheduledAlarms.size)
+    }
+    assertFalse(context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
+      .requestedPermissions.orEmpty().contains(android.Manifest.permission.INTERNET))
+    assertEquals(0, context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_ALLOW_BACKUP)
   }
 }
 

@@ -28,6 +28,7 @@ import com.example.ui.components.BackupControls
 import com.example.ui.components.GoalSettings
 import com.example.ui.components.AppearanceSettings
 import com.example.ui.components.CycleControls
+import com.example.ui.components.ReminderControls
 import com.example.ui.theme.*
 import com.example.viewmodel.NewMeViewModel
 
@@ -55,8 +56,8 @@ fun SystemScreen(
         // Header
         item {
             Column {
-                Text("SYSTEM & DISCIPLINE", color = NewMePrimary, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 0.sp)
-                Text("Rules create freedom. Calibrate targets and operating principles.", color = NewMeTextSecondary, fontSize = 12.sp)
+                Text("SETTINGS & ROUTINE", color = NewMePrimary, fontSize = 18.sp, fontWeight = FontWeight.Black, letterSpacing = 0.sp)
+                Text("Personal targets and preferences", color = NewMeTextSecondary, fontSize = 12.sp)
             }
         }
 
@@ -248,30 +249,30 @@ fun SystemScreen(
 
         // The Non-Negotiables (Section 21)
         item {
-            Text("NON-NEGOTIABLE OPERATING RULES", color = NewMeTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("SUPPORTIVE DAILY ROUTINES", color = NewMeTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
 
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 RuleCard(
                     number = "01",
-                    title = "Never Miss Protein Twice",
+                    title = "Return To A Manageable Target",
                     description = "Choose a manageable nutrition target. An imperfect day does not erase your progress."
                 )
                 RuleCard(
                     number = "02",
-                    title = "Recovery Is Active Fat Loss",
+                    title = "Rest Supports Recovery",
                     description = "Rest supports your daily routine. Your sleep target is an estimate, not a medical prescription."
                 )
                 RuleCard(
                     number = "03",
                     title = "Win The Next Decision",
-                    description = "A missed workout or unplanned meal never ruins a week. What ruins a week is self-punishment or giving up."
+                    description = "A missed workout or unplanned meal does not erase your progress. Choose one manageable next step."
                 )
                 RuleCard(
                     number = "04",
                     title = "Meal Prep Protects Willpower",
-                    description = "When hunger hits at 8 PM, your environment decides. Keep boiled eggs, pre-grilled chicken, or clean proteins ready."
+                    description = "Preparing food that suits your preferences can make a busy day easier."
                 )
             }
         }
@@ -288,7 +289,7 @@ fun SystemScreen(
                     Text("DISCIPLINE LEVEL SYSTEM", color = NewMeTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "You earn XP by executing daily habits without excuses: +30 XP for workouts, +15 XP for hitting water or protein targets, +20 XP for restorative sleep.",
+                        "Earn XP once for each eligible action: +30 XP for a completed workout, +25 XP for a saved tracked session, +15 XP for a water or protein target, and +20 XP for a sleep target. Your earned XP stays after missed days.",
                         color = NewMeTextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -318,7 +319,7 @@ fun SystemScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Security, contentDescription = null, tint = NewMeSecondary, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("100% Offline & Private", color = NewMeTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("Local Storage & Privacy", color = NewMeTextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -344,6 +345,7 @@ fun SystemScreen(
         item { GoalSettings(viewModel) }
         item { AppearanceSettings(viewModel) }
         item { CycleControls(viewModel) }
+        item { ReminderControls(viewModel) }
 
         // Recalibrate / Re-run Onboarding
         item {

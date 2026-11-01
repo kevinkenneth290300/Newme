@@ -407,7 +407,7 @@ fun QuickSleepDialog(
                             .padding(8.dp)
                     ) {
                         Text(
-                            "Recovery is becoming a bottleneck. Aim for 7h+ to maximize fat loss and muscle retention.",
+                            "Rest supports recovery. Your sleep target is a personal estimate, not a medical prescription.",
                             color = NewMeCoral,
                             fontSize = 12.sp
                         )

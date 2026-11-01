@@ -13,8 +13,22 @@ import com.example.data.model.ThemeMode
 import com.example.viewmodel.NewMeViewModel
 import com.example.ui.NewMeApp
 import com.example.ui.theme.NewMeTheme
+import com.example.data.reminder.ReminderScheduler
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+  override fun onResume() {
+    super.onResume()
+    lifecycleScope.launch {
+      val scheduler = ReminderScheduler.from(this@MainActivity)
+      try { scheduler.reconcile() }
+      catch (cancelled: CancellationException) { throw cancelled }
+      catch (error: Exception) { scheduler.reportFailure() }
+    }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()

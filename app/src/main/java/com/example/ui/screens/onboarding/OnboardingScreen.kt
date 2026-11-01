@@ -1383,7 +1383,7 @@ fun OnboardingScreen(
                             ) {
                                 Column(modifier = Modifier.padding(20.dp)) {
                                     Text(
-                                        text = "You will have bad days.\n\nYou will miss workouts.\nYou will eat something you didn't plan.\nYou will lose motivation sometimes.\n\nNewMe isn't here to punish you for that.\n\nThe rule is simple:\n\nNever let one bad decision become two.",
+                                        text = "Some days will not go to plan.\n\nYou may miss an activity or change a meal. Your energy and circumstances can change too.\n\nThat does not erase your effort or earned XP.\n\nChoose a manageable next step when you are ready.",
                                         color = NewMeTextSecondary,
                                         fontSize = 15.sp,
                                         lineHeight = 24.sp

@@ -2,6 +2,7 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.net.Uri
+import com.example.NewMeApplication
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.NewMeDatabase
@@ -18,6 +19,8 @@ import com.example.data.cycle.CyclePrediction
 import com.example.data.activity.ActivityTrackingRepository
 import com.example.data.activity.ActivityTrackingService
 import com.example.data.model.ActivityKind
+import com.example.data.reminder.ReminderRepository
+import com.example.data.reminder.ReminderScheduler
 import com.example.data.repository.DisciplineScoreBreakdown
 import com.example.data.repository.LevelInfo
 import com.example.data.repository.NewMeRepository
@@ -54,6 +57,14 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     private val settingsRepository = SettingsRepository(database)
     private val cycleRepository = CycleRepository(database, clock)
     private val trackingRepository = ActivityTrackingRepository(database, clock)
+    private val reminderRepository = ReminderRepository(database, clock)
+    val reminders = reminderRepository.reminders.catch { error ->
+        if (error is CancellationException) throw error
+        _operationError.value = "Reminder settings could not be opened. Existing data was kept."
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val reminderError = ReminderScheduler.from(application).failure.asStateFlow()
+    private val _savingReminder = MutableStateFlow(false)
+    val savingReminder = _savingReminder.asStateFlow()
     val activeTracking = trackingRepository.active.catch { error ->
         if (error is CancellationException) throw error
         _operationError.value = "Activity state could not be opened. Saved data was kept."
@@ -62,6 +73,8 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     val trackingBusy = ActivityTrackingService.commandPending
     private val _savingActivityLog = MutableStateFlow(false)
     val savingActivityLog = _savingActivityLog.asStateFlow()
+    private val _savingActivityDistance = MutableStateFlow(false)
+    val savingActivityDistance = _savingActivityDistance.asStateFlow()
     val cycleEntries = cycleRepository.entries.catch { error ->
         if (error is CancellationException) throw error
         _operationError.value = "Cycle history could not be opened. Existing data was kept."
@@ -73,8 +86,8 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     val savingCycle = _savingCycle.asStateFlow()
     private val _achievementProgress = MutableStateFlow<List<AchievementProgress>>(emptyList())
     val achievementProgress = _achievementProgress.asStateFlow()
-    private val backupStore = BackupStore(database)
-    private val _operationError = MutableStateFlow<String?>(null)
+    private val backupStore = BackupStore(database, getApplication<Application>())
+    private val _operationError = MutableStateFlow((application as NewMeApplication).maintenanceError)
     val operationError = _operationError.asStateFlow()
     private val writes = UiWriteQueue(viewModelScope, { _operationError.value = it }, {
         gamification.refresh()
@@ -661,6 +674,35 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setCycleEnabled(enabled: Boolean) { writes.launch { cycleRepository.enabled(enabled) } }
 
+    fun setTaskReminders(enabled: Boolean) { writes.launch { reminderRepository.setTaskEnabled(enabled) } }
+    fun setCycleReminders(enabled: Boolean) { writes.launch { reminderRepository.setCycleEnabled(enabled) } }
+
+    fun setQuietHours(start: Int, end: Int, onSaved: () -> Unit) {
+        writes.launch { reminderRepository.quietHours(start, end); onSaved() }
+    }
+
+    fun saveReminder(key: String, minute: Int, enabled: Boolean, timeSensitive: Boolean, taskId: Long? = null, onSaved: () -> Unit = {}) {
+        if (_savingReminder.value || writes.isMaintaining) return
+        _savingReminder.value = true
+        writes.launch {
+            try { reminderRepository.save(key, minute, enabled, timeSensitive, taskId); onSaved() }
+            finally { _savingReminder.value = false }
+        }
+    }
+
+    fun reminderPermissionDenied() {
+        _operationError.value = "Notifications are off. You can allow them later in Android settings."
+    }
+
+    fun refreshReminders() {
+        viewModelScope.launch {
+            val scheduler = ReminderScheduler.from(getApplication<Application>())
+            try { scheduler.reconcile() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { scheduler.reportFailure() }
+        }
+    }
+
     fun saveCycle(entry: CycleEntryEntity, onSaved: () -> Unit) {
         if (_savingCycle.value || writes.isMaintaining) return
         _savingCycle.value = true
@@ -690,6 +732,15 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     fun route(key: String) = database.activityTrackingDao().observeRoute(key)
     fun deleteRoute(key: String) { writes.launch { trackingRepository.deleteRoute(key) } }
     fun deleteTrackedActivity(key: String) { writes.launch { trackingRepository.deleteFinished(key) } }
+
+    fun correctActivityDistance(key: String, kilometers: Double, onSaved: () -> Unit) {
+        if (_savingActivityDistance.value || writes.isMaintaining) return
+        _savingActivityDistance.value = true
+        writes.launch {
+            try { trackingRepository.correctDistance(key, kilometers); onSaved() }
+            finally { _savingActivityDistance.value = false }
+        }
+    }
 
     fun completeOnboarding(profile: UserProfileEntity, preferences: OnboardingPreferences? = null, onSaved: () -> Unit = {}) {
         if (_savingOnboarding.value || writes.isMaintaining) return

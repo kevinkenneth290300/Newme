@@ -111,6 +111,21 @@
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "NewMe: Verify Handoff",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:clean :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "NewMe: Check Release Readiness",
+			"type": "shell",
+			"command": "& { $sdk = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $signing = -not [string]::IsNullOrWhiteSpace($env:KEYSTORE_PATH) -and -not [string]::IsNullOrWhiteSpace($env:STORE_PASSWORD) -and -not [string]::IsNullOrWhiteSpace($env:KEY_PASSWORD); [PSCustomObject]@{ Jdk21Available = [bool](Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1); Platform361Installed = (Test-Path (Join-Path $sdk 'platforms\\android-36.1')); BuildTools360Installed = (Test-Path (Join-Path $sdk 'build-tools\\36.0.0')); ReleaseSigningInputsPresent = $signing; KeystoreExists = ($signing -and (Test-Path $env:KEYSTORE_PATH -PathType Leaf)) } | Format-List; & (Join-Path $sdk 'platform-tools\\adb.exe') devices -l; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	]
 }

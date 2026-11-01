@@ -3,6 +3,7 @@ package com.example.data.local.entity
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.Index
+import androidx.room.ForeignKey
 
 @Entity(tableName = "app_settings")
 data class AppSettingsEntity(
@@ -51,4 +52,18 @@ data class CycleEntryEntity(
     val startDate: String,
     val endDate: String? = null,
     val symptoms: String = ""
+)
+
+@Entity(tableName = "reminders", foreignKeys = [ForeignKey(
+    entity = DailyChecklistItemEntity::class, parentColumns = ["id"], childColumns = ["taskId"],
+    onDelete = ForeignKey.CASCADE
+)], indices = [Index("taskId")])
+data class ReminderEntity(
+    @PrimaryKey val key: String,
+    val kind: String,
+    val taskId: Long? = null,
+    val minuteOfDay: Int = 540,
+    val enabled: Boolean = false,
+    val timeSensitive: Boolean = false,
+    val lastDeliveredToken: String = ""
 )

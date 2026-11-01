@@ -75,3 +75,21 @@ interface CycleDao {
     @Delete
     suspend fun delete(entry: CycleEntryEntity)
 }
+
+@Dao
+interface ReminderDao {
+    @Query("SELECT * FROM reminders ORDER BY `key`")
+    fun observe(): Flow<List<ReminderEntity>>
+
+    @Query("SELECT * FROM reminders ORDER BY `key`")
+    suspend fun getAll(): List<ReminderEntity>
+
+    @Query("SELECT * FROM reminders WHERE `key` = :key")
+    suspend fun get(key: String): ReminderEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun save(reminder: ReminderEntity)
+
+    @Query("UPDATE reminders SET lastDeliveredToken = :token WHERE `key` = :key AND lastDeliveredToken != :token")
+    suspend fun markDelivered(key: String, token: String): Int
+}

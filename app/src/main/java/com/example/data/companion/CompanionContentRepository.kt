@@ -479,7 +479,7 @@ object CompanionContentRepository {
             moods = listOf(MoodState.READY),
             progressStates = listOf(ProgressState.ON_TRACK),
             tone = CompanionTone.STRICT,
-            message = "Your evening workout will either happen or excuses will replace it. Decide right now that it is non-negotiable.",
+            message = "Choose an evening activity that fits your energy and circumstances. A smaller step or a rest day can still support your routine.",
             optionalAction = "View Gym Plan",
             actionType = ActionType.START_WORKOUT
         ),
@@ -868,7 +868,7 @@ object CompanionContentRepository {
             moods = listOf(MoodState.STRESSED),
             progressStates = listOf(ProgressState.ON_TRACK),
             tone = CompanionTone.BALANCED,
-            message = "You cannot rewrite today's problems, but you have 100% authority over what you consume tonight.",
+            message = "A difficult day does not define you. Choose a manageable meal and make room for rest tonight.",
             optionalAction = "Clean Nourishment",
             actionType = ActionType.COMPLETE_MEAL
         ),
@@ -1136,7 +1136,7 @@ object CompanionContentRepository {
             moods = listOf(MoodState.TIRED),
             progressStates = listOf(ProgressState.ON_TRACK),
             tone = CompanionTone.CALM,
-            message = "Growth and fat loss occur while you sleep. Respect your bed as the recovery lab of your new self.",
+            message = "Sleep supports recovery and wellbeing. Give yourself the opportunity to rest; changes in body composition are not guaranteed.",
             optionalAction = "Record Sleep",
             actionType = ActionType.SLEEP_PREP
         ),
@@ -1180,7 +1180,7 @@ object CompanionContentRepository {
             moods = listOf(MoodState.OVERWHELMED),
             progressStates = listOf(ProgressState.BEHIND),
             tone = CompanionTone.BALANCED,
-            message = "Do not carry shame to bed. It only ruins sleep and weakens tomorrow's discipline. Breathe out and let go.",
+            message = "An imperfect day does not erase your effort. Take a breath and give yourself room to rest.",
             optionalAction = "Night Reflection",
             actionType = ActionType.CHECK_IN
         ),

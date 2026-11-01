@@ -14,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.cycle.CyclePrediction
@@ -31,14 +33,25 @@ fun CycleControls(viewModel: NewMeViewModel) {
     var showEditor by rememberSaveable { mutableStateOf(false) }
     var showHistory by rememberSaveable { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<CycleEntryEntity?>(null) }
+    val enabled = settings?.cycleEnabled == true
+
+    LaunchedEffect(enabled) {
+        if (!enabled) {
+            showEditor = false
+            showHistory = false
+            editing = null
+            deleting = null
+        }
+    }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Optional Cycle History", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Switch(checked = settings?.cycleEnabled ?: false, onCheckedChange = viewModel::setCycleEnabled)
+            Switch(checked = enabled, onCheckedChange = viewModel::setCycleEnabled,
+                modifier = Modifier.semantics { contentDescription = "Cycle tracking" })
         }
         Text("Records stay on this phone. Turning tracking off does not delete your history.", style = MaterialTheme.typography.bodySmall)
-        if (settings?.cycleEnabled == true) {
+        if (enabled) {
             when (val estimate = prediction) {
                 is CyclePrediction.Estimate -> Text("Estimated next start: ${estimate.date}\nBased on ${estimate.intervalCount} recent intervals (median ${estimate.medianDays} days).", style = MaterialTheme.typography.bodyMedium)
                 CyclePrediction.Insufficient -> Text("Insufficient history for an estimate. At least three recorded starts are needed.", style = MaterialTheme.typography.bodyMedium)
@@ -48,21 +61,21 @@ fun CycleControls(viewModel: NewMeViewModel) {
             OutlinedButton(onClick = { editing = null; showEditor = true }) {
                 Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add Period Dates")
             }
+            entries.take(4).forEach { entry ->
+                CycleRow(entry, onEdit = { editing = entry; showEditor = true }, onDelete = { deleting = entry })
+            }
+            if (entries.size > 4) TextButton(onClick = { showHistory = true }) { Text("All Period Entries (${entries.size})") }
         }
-        entries.take(4).forEach { entry ->
-            CycleRow(entry, onEdit = { editing = entry; showEditor = true }, onDelete = { deleting = entry })
-        }
-        if (entries.size > 4) TextButton(onClick = { showHistory = true }) { Text("All Period Entries (${entries.size})") }
         HorizontalDivider()
     }
 
-    if (showHistory) AlertDialog(onDismissRequest = { showHistory = false }, title = { Text("Period History") },
+    if (enabled && showHistory) AlertDialog(onDismissRequest = { showHistory = false }, title = { Text("Period History") },
         text = { LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
             items(entries, key = { it.id }) { entry -> CycleRow(entry,
                 { editing = entry; showEditor = true }, { deleting = entry }) }
         } }, confirmButton = { TextButton(onClick = { showHistory = false }) { Text("Close") } })
 
-    if (showEditor) key(editing?.id) {
+    if (enabled && showEditor) key(editing?.id) {
         var start by rememberSaveable { mutableStateOf(editing?.startDate ?: LocalDate.now().toString()) }
         var end by rememberSaveable { mutableStateOf(editing?.endDate.orEmpty()) }
         var symptoms by rememberSaveable { mutableStateOf(editing?.symptoms.orEmpty()) }
@@ -88,7 +101,7 @@ fun CycleControls(viewModel: NewMeViewModel) {
             TextButton(enabled = !saving, onClick = { showEditor = false }) { Text("Cancel") }
         })
     }
-    deleting?.let { entry -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete Period Entry?") },
+    deleting?.takeIf { enabled }?.let { entry -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete Period Entry?") },
         text = { Text("This removes the selected dates and symptoms from local history.") },
         confirmButton = { TextButton(onClick = { viewModel.deleteCycle(entry); deleting = null }) { Text("Delete") } },
         dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } }) }

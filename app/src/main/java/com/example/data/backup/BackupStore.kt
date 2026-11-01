@@ -1,11 +1,17 @@
 package com.example.data.backup
 
 import android.content.ContentResolver
+import android.content.Context
 import android.database.Cursor
 import android.net.Uri
 import android.util.Base64
+import androidx.room.Room
+import androidx.room.RoomDatabase
 import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteOpenHelper
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
+import com.example.data.local.DatabaseMigrations
 import com.example.data.local.NewMeDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -14,6 +20,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
 
@@ -27,7 +34,11 @@ class PreparedBackup internal constructor(
     val recordCount: Int get() = tables.sumOf { it.rows.size }
 }
 
-class BackupStore(private val database: NewMeDatabase, private val cipher: BackupCipher = BackupCipher()) {
+class BackupStore(
+    private val database: NewMeDatabase,
+    private val context: Context,
+    private val cipher: BackupCipher = BackupCipher()
+) {
     suspend fun export(password: CharArray): ByteArray = withContext(Dispatchers.IO) {
         val plaintext = database.withTransaction {
             val sql = database.openHelper.writableDatabase
@@ -97,8 +108,7 @@ class BackupStore(private val database: NewMeDatabase, private val cipher: Backu
                     })
             }
             val prepared = PreparedBackup(json.getInt("schemaVersion"), json.getString("identityHash"), tables)
-            database.withTransaction { validate(database.openHelper.writableDatabase, prepared) }
-            prepared
+            stageAndMigrate(prepared)
         } finally {
             plaintext.fill(0)
         }
@@ -109,28 +119,7 @@ class BackupStore(private val database: NewMeDatabase, private val cipher: Backu
             val sql = database.openHelper.writableDatabase
             validate(sql, prepared)
             currentCoroutineContext().ensureActive()
-            sql.execSQL("PRAGMA defer_foreign_keys = ON")
-            prepared.tables.forEach { sql.execSQL("DELETE FROM ${quoted(it.name)}") }
-            for (table in prepared.tables) {
-                val placeholders = table.columns.joinToString(",") { "?" }
-                val columns = table.columns.joinToString(",", transform = ::quoted)
-                sql.compileStatement("INSERT INTO ${quoted(table.name)} ($columns) VALUES ($placeholders)").use { statement ->
-                    for (row in table.rows) {
-                        currentCoroutineContext().ensureActive()
-                        statement.clearBindings()
-                        row.forEachIndexed { index, cell ->
-                            when (cell.type) {
-                                Cursor.FIELD_TYPE_NULL -> statement.bindNull(index + 1)
-                                Cursor.FIELD_TYPE_INTEGER -> statement.bindLong(index + 1, cell.value!!.toLong())
-                                Cursor.FIELD_TYPE_FLOAT -> statement.bindDouble(index + 1, cell.value!!.toDouble())
-                                Cursor.FIELD_TYPE_STRING -> statement.bindString(index + 1, cell.value!!)
-                                Cursor.FIELD_TYPE_BLOB -> statement.bindBlob(index + 1, Base64.decode(cell.value, Base64.NO_WRAP))
-                            }
-                        }
-                        statement.executeInsert()
-                    }
-                }
-            }
+            replaceTables(sql, prepared.tables)
             sql.execSQL("UPDATE app_settings SET cycleRemindersEnabled = 0")
             sql.execSQL("UPDATE activity_tracks SET status = 'PAUSED', lastStepCounter = -1, routeSegment = routeSegment + 1, warning = 'Restored session is paused; review and resume explicitly.' WHERE sessionKey IN (SELECT sessionKey FROM active_tracking)")
             sql.query("PRAGMA foreign_key_check").use { require(!it.moveToFirst()) { "Backup contains broken record relationships." } }
@@ -178,6 +167,112 @@ class BackupStore(private val database: NewMeDatabase, private val cipher: Backu
             prepare(encrypted, password)
         } finally {
             encrypted.fill(0)
+        }
+    }
+
+    private suspend fun stageAndMigrate(backup: PreparedBackup): PreparedBackup {
+        val currentVersion = database.openHelper.writableDatabase.version
+        require(backup.schemaVersion in 4..currentVersion) { "Unsupported backup schema. Existing data has not changed." }
+        val schema = context.assets.open("com.example.data.local.NewMeDatabase/${backup.schemaVersion}.json")
+            .bufferedReader().use { JSONObject(it.readText()).getJSONObject("database") }
+        require(backup.identityHash == schema.getString("identityHash")) { "Unrecognized backup schema. Existing data has not changed." }
+        val file = File.createTempFile("newme-restore-", ".db", context.noBackupFilesDir)
+        var helper: SupportSQLiteOpenHelper? = null
+        var staged: NewMeDatabase? = null
+        try {
+            helper = FrameworkSQLiteOpenHelperFactory().create(
+                SupportSQLiteOpenHelper.Configuration.builder(context).name(file.absolutePath)
+                    .callback(object : SupportSQLiteOpenHelper.Callback(backup.schemaVersion) {
+                        override fun onConfigure(db: SupportSQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
+                        override fun onCreate(db: SupportSQLiteDatabase) {
+                            val entities = schema.getJSONArray("entities")
+                            for (index in 0 until entities.length()) {
+                                val entity = entities.getJSONObject(index)
+                                val table = entity.getString("tableName")
+                                db.execSQL(entity.getString("createSql").replace("\${TABLE_NAME}", table))
+                                val indices = entity.optJSONArray("indices") ?: JSONArray()
+                                for (item in 0 until indices.length()) {
+                                    db.execSQL(indices.getJSONObject(item).getString("createSql").replace("\${TABLE_NAME}", table))
+                                }
+                            }
+                            val queries = schema.getJSONArray("setupQueries")
+                            for (index in 0 until queries.length()) db.execSQL(queries.getString(index))
+                        }
+                        override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                            error("Backup staging must use an explicit Room migration.")
+                        }
+                    }).build()
+            )
+            val source = helper.writableDatabase
+            source.beginTransaction()
+            try {
+                validate(source, backup)
+                replaceTables(source, backup.tables)
+                source.query("PRAGMA foreign_key_check").use { require(!it.moveToFirst()) { "Backup contains broken record relationships." } }
+                currentCoroutineContext().ensureActive()
+                source.setTransactionSuccessful()
+            } finally {
+                source.endTransaction()
+            }
+            helper.close()
+            helper = null
+            staged = Room.databaseBuilder(context, NewMeDatabase::class.java, file.absolutePath)
+                .addMigrations(*DatabaseMigrations.ALL)
+                .setJournalMode(RoomDatabase.JournalMode.TRUNCATE).build()
+            val sql = staged.openHelper.writableDatabase
+            val tables = tableNames(sql).map { name ->
+                val columns = columnNames(sql, name)
+                val rows = buildList {
+                    sql.query("SELECT * FROM ${quoted(name)} ORDER BY rowid").use { cursor ->
+                        while (cursor.moveToNext()) {
+                            currentCoroutineContext().ensureActive()
+                            add(columns.indices.map { column ->
+                                val type = cursor.getType(column)
+                                BackupCell(type, when (type) {
+                                    Cursor.FIELD_TYPE_NULL -> null
+                                    Cursor.FIELD_TYPE_BLOB -> Base64.encodeToString(cursor.getBlob(column), Base64.NO_WRAP)
+                                    else -> cursor.getString(column)
+                                })
+                            })
+                        }
+                    }
+                }
+                BackupTable(name, columns, rows)
+            }
+            val prepared = PreparedBackup(sql.version, identityHash(sql), tables)
+            database.withTransaction { validate(database.openHelper.writableDatabase, prepared) }
+            return prepared
+        } catch (error: android.database.sqlite.SQLiteException) {
+            throw IllegalArgumentException("Backup contains invalid records. Existing data has not changed.", error)
+        } finally {
+            staged?.close()
+            helper?.close()
+            context.deleteDatabase(file.absolutePath)
+        }
+    }
+
+    private suspend fun replaceTables(sql: SupportSQLiteDatabase, tables: List<BackupTable>) {
+        sql.execSQL("PRAGMA defer_foreign_keys = ON")
+        tables.forEach { sql.execSQL("DELETE FROM ${quoted(it.name)}") }
+        for (table in tables) {
+            val placeholders = table.columns.joinToString(",") { "?" }
+            val columns = table.columns.joinToString(",", transform = ::quoted)
+            sql.compileStatement("INSERT INTO ${quoted(table.name)} ($columns) VALUES ($placeholders)").use { statement ->
+                for (row in table.rows) {
+                    currentCoroutineContext().ensureActive()
+                    statement.clearBindings()
+                    row.forEachIndexed { index, cell ->
+                        when (cell.type) {
+                            Cursor.FIELD_TYPE_NULL -> statement.bindNull(index + 1)
+                            Cursor.FIELD_TYPE_INTEGER -> statement.bindLong(index + 1, cell.value!!.toLong())
+                            Cursor.FIELD_TYPE_FLOAT -> statement.bindDouble(index + 1, cell.value!!.toDouble())
+                            Cursor.FIELD_TYPE_STRING -> statement.bindString(index + 1, cell.value!!)
+                            Cursor.FIELD_TYPE_BLOB -> statement.bindBlob(index + 1, Base64.decode(cell.value, Base64.NO_WRAP))
+                        }
+                    }
+                    statement.executeInsert()
+                }
+            }
         }
     }
 
@@ -234,6 +329,12 @@ class BackupStore(private val database: NewMeDatabase, private val cipher: Backu
     private fun quoted(name: String): String = "\"${name.replace("\"", "\"\"")}\""
 
     companion object {
+        fun clearInterruptedStaging(context: Context) {
+            context.noBackupFilesDir.listFiles()?.filter { it.name.startsWith("newme-restore-") }?.forEach { file ->
+                check(file.delete() || !file.exists()) { "An interrupted local restore could not be cleaned up." }
+            }
+        }
+
         fun requireLocalDocument(uri: Uri) {
             require(uri.scheme == "content" && uri.authority in setOf(
                 "com.android.externalstorage.documents", "com.android.providers.downloads.documents", "com.android.providers.media.documents"

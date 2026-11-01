@@ -5,6 +5,7 @@ import com.example.data.local.NewMeDatabase
 import com.example.data.local.entity.AppSettingsEntity
 import com.example.data.local.entity.CycleEntryEntity
 import com.example.util.DeviceClock
+import kotlinx.coroutines.flow.combine
 import java.time.Clock
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -33,7 +34,9 @@ object CycleRules {
 }
 
 class CycleRepository(private val database: NewMeDatabase, private val clock: Clock = DeviceClock()) {
-    val entries = database.cycleDao().observe()
+    val entries = combine(database.settingsDao().observe(), database.cycleDao().observe()) { settings, records ->
+        if (settings?.cycleEnabled == true) records else emptyList()
+    }
 
     suspend fun enabled(enabled: Boolean) = database.withTransaction {
         val settings = database.settingsDao().get() ?: AppSettingsEntity()

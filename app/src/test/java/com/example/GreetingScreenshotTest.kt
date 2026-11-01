@@ -9,6 +9,9 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.lifecycle.ViewModelStore
@@ -19,6 +22,11 @@ import com.example.data.model.ThemeMode
 import com.example.data.model.DailyGoalKind
 import com.example.data.model.OnboardingPreferences
 import com.example.data.local.entity.UserProfileEntity
+import com.example.data.local.NewMeDatabase
+import com.example.data.cycle.CycleRepository
+import com.example.data.local.entity.CycleEntryEntity
+import com.example.ui.components.CycleControls
+import com.example.ui.components.ReminderControls
 import com.example.viewmodel.NewMeViewModel
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -90,6 +98,79 @@ class GreetingScreenshotTest {
     } finally {
       store.clear()
     }
+  }
+
+  @Test
+  fun `cycle opt out hides saved history and re enabling restores it`() {
+    val application = ApplicationProvider.getApplicationContext<Application>()
+    val model = NewMeViewModel(application)
+    val store = ViewModelStore().apply { put("synthetic-cycle", model) }
+    val database = NewMeDatabase.getInstance(application)
+    val cycle = CycleRepository(database)
+    runBlocking {
+      model.repository.resetAllData()
+      model.repository.completeOnboarding(UserProfileEntity(name = "Synthetic User", sex = "Female"),
+        OnboardingPreferences(DailyGoalKind.TASKS, 3, cycleEnabled = true))
+      cycle.save(CycleEntryEntity(startDate = "2020-01-01", symptoms = "Synthetic private history"))
+    }
+    composeTestRule.setContent { NewMeTheme(reducedMotion = true) { CycleControls(model) } }
+    try {
+      composeTestRule.waitUntil(15_000) { model.cycleEntries.value.size == 1 }
+      composeTestRule.onNodeWithText("Synthetic private history").assertIsDisplayed()
+      composeTestRule.onNodeWithContentDescription("Cycle tracking").performClick()
+      org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+      composeTestRule.waitForIdle()
+      composeTestRule.waitUntil(15_000) {
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        model.appSettings.value?.cycleEnabled == false && model.cycleEntries.value.isEmpty()
+      }
+      composeTestRule.onNodeWithText("Synthetic private history").assertDoesNotExist()
+      composeTestRule.onNodeWithText("2020-01-01").assertDoesNotExist()
+      assertTrue(runBlocking { database.cycleDao().getAll().size == 1 })
+      composeTestRule.onNodeWithContentDescription("Cycle tracking").performClick()
+      org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+      composeTestRule.waitForIdle()
+      composeTestRule.waitUntil(15_000) {
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        model.cycleEntries.value.size == 1
+      }
+      composeTestRule.onNodeWithText("Synthetic private history").assertIsDisplayed()
+    } finally { store.clear() }
+  }
+
+  @Test
+  fun `reminder settings and quiet hours fit at large font scale in both themes`() {
+    val application = ApplicationProvider.getApplicationContext<Application>()
+    val model = NewMeViewModel(application)
+    val store = ViewModelStore().apply { put("synthetic-reminders", model) }
+    val database = NewMeDatabase.getInstance(application)
+    runBlocking {
+      model.repository.resetAllData()
+      model.repository.completeOnboarding(UserProfileEntity(name = "Synthetic User", sex = "Female"),
+        OnboardingPreferences(DailyGoalKind.TASKS, 3, cycleEnabled = true))
+      com.example.data.reminder.ReminderRepository(database).setTaskEnabled(true)
+    }
+    val theme = mutableStateOf(ThemeMode.LIGHT)
+    org.robolectric.RuntimeEnvironment.setFontScale(1.8f)
+    composeTestRule.setContent {
+      NewMeTheme(themeMode = theme.value, reducedMotion = true) { ReminderControls(model) }
+    }
+    try {
+      composeTestRule.waitUntil(15_000) { model.appSettings.value?.taskRemindersEnabled == true }
+      for (mode in listOf(ThemeMode.LIGHT, ThemeMode.DARK)) {
+        composeTestRule.runOnIdle { theme.value = mode }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithContentDescription("Task notifications").assertIsDisplayed()
+        val root = composeTestRule.onRoot().fetchSemanticsNode().boundsInRoot
+        val texts = composeTestRule.onAllNodes(hasText("", substring = true), useUnmergedTree = true).fetchSemanticsNodes()
+        texts.filter { it.boundsInRoot.overlaps(root) }.forEach { node ->
+          assertTrue("Reminder text escaped horizontal bounds", node.boundsInRoot.left >= root.left - 1f && node.boundsInRoot.right <= root.right + 1f)
+        }
+      }
+      composeTestRule.onNodeWithContentDescription("Edit quiet hours").performClick()
+      composeTestRule.onNodeWithText("Quiet Hours").assertIsDisplayed()
+      composeTestRule.onNodeWithText("Cancel").performClick()
+    } finally { store.clear() }
   }
 }
 

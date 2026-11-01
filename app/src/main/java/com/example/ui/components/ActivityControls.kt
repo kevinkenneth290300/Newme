@@ -31,6 +31,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.activity.ActivityTrackingService
 import com.example.data.local.entity.RoutePointEntity
+import com.example.data.local.entity.ActivityTrackEntity
 import com.example.data.model.ActivityKind
 import com.example.viewmodel.NewMeViewModel
 import kotlin.math.cos
@@ -43,6 +44,8 @@ fun ActivityControls(viewModel: NewMeViewModel) {
     val history by viewModel.trackedHistory.collectAsStateWithLifecycle()
     val busy by viewModel.trackingBusy.collectAsStateWithLifecycle()
     val savingManual by viewModel.savingActivityLog.collectAsStateWithLifecycle()
+    val savingDistance by viewModel.savingActivityDistance.collectAsStateWithLifecycle()
+    var correcting by remember { mutableStateOf<ActivityTrackEntity?>(null) }
     var kindName by rememberSaveable { mutableStateOf(ActivityKind.WALKING.name) }
     var gps by rememberSaveable { mutableStateOf(false) }
     var permissionMessage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -93,7 +96,7 @@ fun ActivityControls(viewModel: NewMeViewModel) {
             Text(ActivityKind.fromStored(track.activityType).label, style = MaterialTheme.typography.bodyLarge)
             Text("%02d:%02d:%02d".format(track.elapsedMillis / 3_600_000, track.elapsedMillis / 60_000 % 60, track.elapsedMillis / 1000 % 60), style = MaterialTheme.typography.headlineSmall)
             Text(if (track.steps > 0) "${track.steps} sensor steps" else "No sensor steps recorded", style = MaterialTheme.typography.bodySmall)
-            Text(if (track.distanceMeters > 0) "${"%.2f".format(track.distanceMeters / 1000)} km recorded by GPS" else "No GPS distance recorded", style = MaterialTheme.typography.bodySmall)
+            Text(if (track.distanceMeters > 0) "${"%.2f".format(track.distanceMeters / 1000)} km recorded" else "No GPS distance recorded", style = MaterialTheme.typography.bodySmall)
             if (track.warning.isNotBlank()) Text(track.warning, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (track.status == "RUNNING") Button(enabled = !busy, onClick = viewModel::pauseActivity) { Icon(Icons.Default.Pause, null); Spacer(Modifier.width(8.dp)); Text("Pause") }
@@ -118,7 +121,9 @@ fun ActivityControls(viewModel: NewMeViewModel) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                     Text(ActivityKind.fromStored(entry.activityType).label, style = MaterialTheme.typography.titleSmall)
                     Text("${java.time.Instant.ofEpochMilli(entry.startEpochMillis).atZone(java.time.ZoneId.systemDefault()).toLocalDate()}  |  ${entry.elapsedMillis / 60_000} minutes", style = MaterialTheme.typography.bodySmall)
+                    Text("${"%.2f".format(entry.distanceMeters / 1000.0)} km recorded", style = MaterialTheme.typography.bodySmall)
                     Row {
+                        IconButton(onClick = { correcting = entry }) { Icon(Icons.Default.Straighten, "Correct recorded distance") }
                         if (entry.gpsEnabled) IconButton(onClick = { routeKey = entry.sessionKey }) { Icon(Icons.Default.Route, "Preview local route") }
                         IconButton(onClick = { viewModel.deleteRoute(entry.sessionKey) }) { Icon(Icons.Default.LocationOff, "Delete route points") }
                         IconButton(onClick = { viewModel.deleteTrackedActivity(entry.sessionKey) }) { Icon(Icons.Default.Delete, "Delete tracked activity") }
@@ -126,6 +131,25 @@ fun ActivityControls(viewModel: NewMeViewModel) {
                 }
             }
         } }, confirmButton = { TextButton(onClick = { showHistory = false }) { Text("Close") } })
+    correcting?.let { entry -> key(entry.sessionKey) {
+        var distance by rememberSaveable { mutableStateOf(String.format(java.util.Locale.ROOT, "%.3f", entry.distanceMeters / 1000.0)) }
+        var error by rememberSaveable { mutableStateOf<String?>(null) }
+        AlertDialog(onDismissRequest = { if (!savingDistance) correcting = null }, title = { Text("Recorded Distance") }, text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(ActivityKind.fromStored(entry.activityType).label, style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(distance, { distance = it }, label = { Text("Distance (km)") }, singleLine = true,
+                    enabled = !savingDistance, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                Text("Saved duration, steps, rewards, and route points stay unchanged.", style = MaterialTheme.typography.bodySmall)
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        }, confirmButton = { TextButton(enabled = !savingDistance, onClick = {
+            val kilometers = distance.toDoubleOrNull()
+            if (kilometers == null || !kilometers.isFinite() || kilometers !in 0.0..1000.0) error = "Enter a distance between 0 and 1000 km."
+            else viewModel.correctActivityDistance(entry.sessionKey, kilometers) { correcting = null }
+        }) { Text(if (savingDistance) "Saving..." else "Save") } }, dismissButton = {
+            TextButton(enabled = !savingDistance, onClick = { correcting = null }) { Text("Cancel") }
+        })
+    } }
     routeKey?.let { key ->
         val points by viewModel.route(key).collectAsStateWithLifecycle(initialValue = emptyList())
         AlertDialog(onDismissRequest = { routeKey = null }, title = { Text("Local Route") },

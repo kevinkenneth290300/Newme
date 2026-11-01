@@ -17,6 +17,10 @@ import com.example.data.cycle.CyclePrediction
 import com.example.data.local.entity.CycleEntryEntity
 import com.example.data.activity.TrackingRules
 import com.example.util.DateSelection
+import com.example.data.reminder.ReminderRules
+import com.example.data.local.entity.AppSettingsEntity
+import com.example.data.local.entity.ReminderEntity
+import com.example.data.local.entity.DailyChecklistItemEntity
 import java.time.LocalDate
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -212,5 +216,39 @@ class ExampleUnitTest {
     val split = TrackingRules.splitDuration(end, 10_000, java.time.ZoneOffset.UTC)
     assertEquals(5000L, split["2020-01-01"])
     assertEquals(5000L, split["2020-01-02"])
+  }
+
+  @Test
+  fun `reminders respect quiet hours local zones and delivered dates`() {
+    val now = java.time.ZonedDateTime.parse("2020-01-10T21:00:00Z")
+    val settings = AppSettingsEntity(taskRemindersEnabled = true)
+    val reminder = ReminderEntity("daily", "DAILY", minuteOfDay = 1380, enabled = true)
+    val first = ReminderRules.next(reminder, settings, now)!!
+    assertEquals(java.time.Instant.parse("2020-01-11T07:00:00Z").toEpochMilli(), first.epochMillis)
+    assertFalse(first.timeSensitive)
+    val moved = ReminderRules.next(reminder, settings, now.withZoneSameInstant(java.time.ZoneId.of("Asia/Kolkata")))!!
+    assertNotEquals(first.epochMillis, moved.epochMillis)
+    val delivered = ReminderRules.next(reminder.copy(lastDeliveredToken = "2020-01-10"), settings, now)!!
+    assertEquals("2020-01-11", delivered.token)
+    assertNull(ReminderRules.next(reminder, settings.copy(taskRemindersEnabled = false), now))
+    assertEquals(now, ReminderRules.afterQuietHours(now, 0, 0))
+    assertEquals(18, ReminderRules.afterQuietHours(now.withHour(15), 13 * 60, 18 * 60).hour)
+  }
+
+  @Test
+  fun `task completion and cycle opt out suppress reminders and cycle is never exact`() {
+    val now = java.time.ZonedDateTime.parse("2020-03-01T08:00:00Z")
+    val settings = AppSettingsEntity(taskRemindersEnabled = true, cycleEnabled = true, cycleRemindersEnabled = true)
+    val task = DailyChecklistItemEntity(id = 7, date = "2020-03-01", section = "Test", title = "Synthetic")
+    val reminder = ReminderEntity("task:7", "TASK", taskId = 7, enabled = true, timeSensitive = true)
+    assertTrue(ReminderRules.next(reminder, settings, now, task)!!.timeSensitive)
+    assertNull(ReminderRules.next(reminder, settings, now, task.copy(isCompleted = true)))
+    assertNull(ReminderRules.next(reminder.copy(minuteOfDay = 1380), settings, now, task))
+    val cycle = ReminderEntity("cycle", "CYCLE", enabled = true, timeSensitive = true)
+    val estimate = CyclePrediction.Estimate(LocalDate.of(2020, 3, 25), 28, 2)
+    assertFalse(ReminderRules.next(cycle, settings, now, prediction = estimate)!!.timeSensitive)
+    assertNull(ReminderRules.next(cycle, settings.copy(cycleEnabled = false), now, prediction = estimate))
+    assertNull(ReminderRules.next(cycle, settings.copy(cycleRemindersEnabled = false), now, prediction = estimate))
+    assertNull(ReminderRules.next(cycle, settings, now, prediction = CyclePrediction.Uncertain))
   }
 }
