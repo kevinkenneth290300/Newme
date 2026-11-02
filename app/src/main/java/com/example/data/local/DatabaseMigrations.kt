@@ -46,5 +46,24 @@ object DatabaseMigrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_4_5, MIGRATION_5_6)
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            val settings = mapOf("enabledModules" to "TEXT NOT NULL DEFAULT 'ROUTINES,MEALS,GYM,ACTIVITY,WATER,SLEEP,CYCLE'",
+                "dashboardSetupDone" to "INTEGER NOT NULL DEFAULT 0", "momentsEnabled" to "INTEGER NOT NULL DEFAULT 1",
+                "hapticsEnabled" to "INTEGER NOT NULL DEFAULT 0", "pinnedBadges" to "TEXT NOT NULL DEFAULT ''",
+                "starterPacks" to "TEXT NOT NULL DEFAULT ''", "momentTypes" to "TEXT NOT NULL DEFAULT 'sleep,mood,focus,energy,hydrate,win,profile,comeback'",
+                "cycleCheckinsEnabled" to "INTEGER NOT NULL DEFAULT 0")
+            settings.forEach { (column, type) -> db.execSQL("ALTER TABLE app_settings ADD COLUMN $column $type") }
+            db.execSQL("CREATE TABLE routine_templates (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL, iconKey TEXT NOT NULL, recurrence TEXT NOT NULL, daysOfWeekMask INTEGER NOT NULL, dayOfMonth INTEGER NOT NULL, startDate TEXT NOT NULL, sortOrder INTEGER NOT NULL, source TEXT NOT NULL, isActive INTEGER NOT NULL, createdAt INTEGER NOT NULL)")
+            db.execSQL("CREATE TABLE routine_completions (templateId INTEGER NOT NULL, date TEXT NOT NULL, completedAt INTEGER NOT NULL, PRIMARY KEY(templateId, date), FOREIGN KEY(templateId) REFERENCES routine_templates(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+            db.execSQL("CREATE INDEX index_routine_completions_date ON routine_completions(date)")
+            db.execSQL("CREATE TABLE day_summary (date TEXT NOT NULL PRIMARY KEY, goalMet INTEGER NOT NULL, tasksDone INTEGER NOT NULL, tasksTotal INTEGER NOT NULL, activityMinutes INTEGER NOT NULL, xpEarned INTEGER NOT NULL, updatedAt INTEGER NOT NULL, proteinMet INTEGER NOT NULL, waterMet INTEGER NOT NULL, sleepMet INTEGER NOT NULL, workoutDone INTEGER NOT NULL, routineDone INTEGER NOT NULL, routineTotal INTEGER NOT NULL, checkins INTEGER NOT NULL, earlyCheckin INTEGER NOT NULL, trackedSteps INTEGER NOT NULL, trackedMeters REAL NOT NULL, sleepMinutes INTEGER NOT NULL, mood TEXT NOT NULL)")
+            db.execSQL("CREATE TABLE summary_dirty (date TEXT NOT NULL PRIMARY KEY)")
+            db.execSQL("CREATE TABLE moment_log (momentKey TEXT NOT NULL PRIMARY KEY, date TEXT NOT NULL, part TEXT NOT NULL, type TEXT NOT NULL, status TEXT NOT NULL, snoozeCount INTEGER NOT NULL, updatedAt INTEGER NOT NULL, answers TEXT NOT NULL DEFAULT '{}')")
+            db.execSQL("ALTER TABLE reminders ADD COLUMN routineId INTEGER DEFAULT NULL REFERENCES routine_templates(id) ON UPDATE NO ACTION ON DELETE CASCADE")
+            db.execSQL("CREATE INDEX index_reminders_routineId ON reminders(routineId)")
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
 }

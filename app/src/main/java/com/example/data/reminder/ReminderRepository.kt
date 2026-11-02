@@ -7,7 +7,8 @@ import com.example.data.local.NewMeDatabase
 import com.example.data.local.entity.AppSettingsEntity
 import com.example.data.local.entity.DailyChecklistItemEntity
 import com.example.data.local.entity.ReminderEntity
-import com.example.data.repository.NewMeRepository
+import com.example.data.local.entity.RoutineTemplateEntity
+import com.example.data.routine.RoutineSchedule
 import com.example.util.DeviceClock
 import java.time.Clock
 import java.time.LocalDate
@@ -35,7 +36,9 @@ object ReminderRules {
         settings: AppSettingsEntity,
         now: ZonedDateTime,
         task: DailyChecklistItemEntity? = null,
-        prediction: CyclePrediction = CyclePrediction.Insufficient
+        prediction: CyclePrediction = CyclePrediction.Insufficient,
+        routine: RoutineTemplateEntity? = null,
+        routineCompleted: Boolean = false
     ): ReminderOccurrence? {
         require(reminder.minuteOfDay in 0..1439) { "Reminder time is invalid." }
         if (!reminder.enabled) return null
@@ -47,6 +50,14 @@ object ReminderRules {
             "TASK" -> {
                 if (!settings.taskRemindersEnabled || task == null || task.isCompleted || task.id != reminder.taskId) return null
                 listOf(LocalDate.parse(task.date))
+            }
+            "ROUTINE" -> {
+                if (!settings.taskRemindersEnabled || "ROUTINES" !in settings.enabledModules.split(',') ||
+                    routine == null || !routine.isActive || routine.id != reminder.routineId) return null
+                val from = if (reminder.lastDeliveredToken.isNotBlank() && reminder.lastDeliveredToken >= now.toLocalDate().toString())
+                    LocalDate.parse(reminder.lastDeliveredToken).plusDays(1) else now.toLocalDate()
+                val next = RoutineSchedule.next(routine, if (routineCompleted) maxOf(from, now.toLocalDate().plusDays(1)) else from)
+                listOf(next ?: return null)
             }
             "CYCLE" -> {
                 if (!settings.cycleEnabled || !settings.cycleRemindersEnabled || reminder.key != CYCLE) return null
@@ -93,22 +104,28 @@ class ReminderRepository(private val database: NewMeDatabase, private val clock:
         database.settingsDao().save(settings.copy(quietStartMinutes = start, quietEndMinutes = end))
     }
 
-    suspend fun save(key: String, minute: Int, enabled: Boolean, timeSensitive: Boolean, taskId: Long? = null) = database.withTransaction {
+    suspend fun save(key: String, minute: Int, enabled: Boolean, timeSensitive: Boolean, taskId: Long? = null, routineId: Long? = null) = database.withTransaction {
         require(minute in 0..1439) { "Choose a valid reminder time." }
         val kind = when (key) {
             ReminderRules.DAILY -> "DAILY"
             ReminderRules.CYCLE -> "CYCLE"
             else -> {
-                require(taskId != null && key == "task:$taskId") { "Reminder must belong to a saved task." }
-                check(database.dailyChecklistDao().getItem(taskId) != null) { "This task no longer exists." }
-                "TASK"
+                if (routineId != null) {
+                    require(key == "routine:$routineId") { "Reminder must belong to its saved routine." }
+                    check(database.routineDao().get(routineId) != null) { "This routine no longer exists." }
+                    "ROUTINE"
+                } else {
+                    require(taskId != null && key == "task:$taskId") { "Reminder must belong to a saved task." }
+                    check(database.dailyChecklistDao().getItem(taskId) != null) { "This task no longer exists." }
+                    "TASK"
+                }
             }
         }
         val settings = database.settingsDao().get() ?: AppSettingsEntity()
         check(kind != "CYCLE" || !enabled || settings.cycleEnabled) { "Cycle tracking is turned off." }
         val current = database.reminderDao().get(key)
         database.reminderDao().save(ReminderEntity(key, kind, taskId, minute, enabled,
-            timeSensitive && kind != "CYCLE", current?.lastDeliveredToken.orEmpty()))
+            timeSensitive && kind != "CYCLE", current?.lastDeliveredToken.orEmpty(), routineId))
         if (enabled && kind != "CYCLE") database.settingsDao().save(settings.copy(taskRemindersEnabled = true))
         if (kind == "CYCLE") database.settingsDao().save(settings.copy(cycleRemindersEnabled = enabled))
     }
@@ -121,12 +138,13 @@ class ReminderRepository(private val database: NewMeDatabase, private val clock:
             CycleRules.predict(database.cycleDao().getAll(), now.toLocalDate()) else CyclePrediction.Insufficient
         database.reminderDao().getAll().mapNotNull { reminder ->
             val task = reminder.taskId?.let { database.dailyChecklistDao().getItem(it) }
-            ReminderRules.next(reminder, settings, now, task, prediction)
+            val routine = reminder.routineId?.let { database.routineDao().get(it) }
+            val completed = reminder.routineId?.let { database.routineDao().completion(it, now.toLocalDate().toString()) != null } == true
+            ReminderRules.next(reminder, settings, now, task, prediction, routine, completed)
         }
     }
 
     suspend fun claim(key: String, token: String): Boolean {
-        if (key == ReminderRules.DAILY) NewMeRepository(database, clock).ensureDateInitialized(LocalDate.now(clock).toString())
         return database.withTransaction {
             val occurrence = plan().firstOrNull { it.key == key && it.token == token } ?: return@withTransaction false
             val now = ZonedDateTime.now(clock)

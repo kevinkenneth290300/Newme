@@ -47,7 +47,7 @@ class ReminderScheduler(
 
     @OptIn(FlowPreview::class)
     fun observe(scope: CoroutineScope) = scope.launch {
-        database.invalidationTracker.createFlow("reminders", "app_settings", "cycle_entries", "daily_checklist", "user_profile")
+        database.invalidationTracker.createFlow("reminders", "app_settings", "cycle_entries", "daily_checklist", "user_profile", "routine_templates", "routine_completions")
             .debounce(250).collect {
                 try { reconcile() }
                 catch (cancelled: CancellationException) { throw cancelled }
@@ -74,6 +74,9 @@ class ReminderScheduler(
                 "DAILY" -> settings?.taskRemindersEnabled == true
                 "TASK" -> settings?.taskRemindersEnabled == true && record.taskId?.let {
                     database.dailyChecklistDao().getItem(it)?.isCompleted == false
+                } == true
+                "ROUTINE" -> settings?.taskRemindersEnabled == true && "ROUTINES" in settings.enabledModules.split(',') && record.routineId?.let {
+                    database.routineDao().get(it)?.isActive == true
                 } == true
                 else -> false
             }

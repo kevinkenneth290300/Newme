@@ -251,4 +251,86 @@ class ExampleUnitTest {
     assertNull(ReminderRules.next(cycle, settings.copy(cycleRemindersEnabled = false), now, prediction = estimate))
     assertNull(ReminderRules.next(cycle, settings, now, prediction = CyclePrediction.Uncertain))
   }
+
+  @Test
+  fun `routine recurrence handles weekdays weekly and clamped leap year month ends`() {
+    val daily = com.example.data.local.entity.RoutineTemplateEntity(title = "Synthetic", startDate = "2020-01-01")
+    assertTrue(com.example.data.routine.RoutineSchedule.isDue(daily, LocalDate.of(2020, 2, 29)))
+    assertFalse(com.example.data.routine.RoutineSchedule.isDue(daily, LocalDate.of(2019, 12, 31)))
+    val weekly = daily.copy(recurrence = "WEEKLY", daysOfWeekMask = 32)
+    assertTrue(com.example.data.routine.RoutineSchedule.isDue(weekly, LocalDate.of(2020, 2, 29)))
+    assertFalse(com.example.data.routine.RoutineSchedule.isDue(weekly, LocalDate.of(2020, 3, 1)))
+    val weekdays = daily.copy(recurrence = "WEEKDAYS", daysOfWeekMask = 31)
+    assertTrue(com.example.data.routine.RoutineSchedule.isDue(weekdays, LocalDate.of(2020, 3, 2)))
+    assertFalse(com.example.data.routine.RoutineSchedule.isDue(weekdays, LocalDate.of(2020, 3, 1)))
+    for (day in 29..31) {
+      val monthly = daily.copy(recurrence = "MONTHLY", dayOfMonth = day)
+      assertTrue(com.example.data.routine.RoutineSchedule.isDue(monthly, LocalDate.of(2020, 2, 29)))
+      assertTrue(com.example.data.routine.RoutineSchedule.isDue(monthly, LocalDate.of(2021, 2, 28)))
+    }
+    assertEquals(LocalDate.of(2020, 3, 31), com.example.data.routine.RoutineSchedule.next(daily.copy(recurrence = "MONTHLY", dayOfMonth = 31), LocalDate.of(2020, 3, 1)))
+  }
+
+  @Test
+  fun `shared day parts include all boundary hours and map night checkins to evening`() {
+    assertEquals(com.example.data.model.DayPart.NIGHT, com.example.data.model.DayPart.at(3))
+    assertEquals(com.example.data.model.DayPart.MORNING, com.example.data.model.DayPart.at(4))
+    assertEquals(com.example.data.model.DayPart.MIDDAY, com.example.data.model.DayPart.at(12))
+    assertEquals(com.example.data.model.DayPart.EVENING, com.example.data.model.DayPart.at(17))
+    assertEquals("EVENING", com.example.data.model.DayPart.at(22).checkinPeriod)
+  }
+
+  @Test
+  fun `training arc text palette maintains AA contrast in both themes`() {
+    for ((text, background) in com.example.ui.theme.JourneyContrast.textPairs) {
+      assertTrue("Insufficient text contrast", com.example.ui.theme.JourneyContrast.ratio(text, background) >= 4.5)
+    }
+  }
+
+  @Test
+  fun `moments cadence suppresses completed skipped tracking and permission states`() {
+    val clock = java.time.Clock.fixed(java.time.Instant.parse("2020-03-01T08:00:00Z"), java.time.ZoneOffset.UTC)
+    val settings = AppSettingsEntity(dashboardSetupDone = true)
+    val first = com.example.data.moment.MomentRules.next(clock, com.example.data.model.DayPart.MORNING, settings, emptyList(), emptyList(), false, true)!!
+    assertEquals("2020-03-01:MORNING", first.key)
+    assertNull(com.example.data.moment.MomentRules.next(clock, com.example.data.model.DayPart.MORNING, settings, emptyList(), emptyList(), true, true))
+    assertNull(com.example.data.moment.MomentRules.next(clock, com.example.data.model.DayPart.MORNING, settings, emptyList(), emptyList(), false, false))
+    assertNull(com.example.data.moment.MomentRules.next(clock, com.example.data.model.DayPart.MORNING, settings, emptyList(), emptyList(), false, true, permissionOpen = true))
+    var log = com.example.data.local.entity.MomentLogEntity(first.key, first.date, first.part, first.type, updatedAt = clock.millis())
+    repeat(2) { log = com.example.data.moment.MomentRules.snoozed(log, clock.millis()); assertEquals("SNOOZED", log.status) }
+    log = com.example.data.moment.MomentRules.snoozed(log, clock.millis())
+    assertEquals("SKIPPED", log.status)
+    assertNull(com.example.data.moment.MomentRules.next(clock, com.example.data.model.DayPart.MORNING, settings, emptyList(), listOf(log), false, true))
+    assertFalse(com.example.data.moment.MomentRules.isNewOpen(599_999, 0, false))
+    assertTrue(com.example.data.moment.MomentRules.isNewOpen(600_000, 0, false))
+    assertTrue(com.example.data.moment.MomentRules.isNewOpen(0, null, true))
+  }
+
+  @Test
+  fun `all twenty four badges have distinct ids and bounded truthful rule progress`() {
+    val catalog = com.example.data.repository.BadgeCatalog.all
+    assertEquals(24, catalog.size)
+    assertEquals(24, catalog.map { it.id }.distinct().size)
+    for (badge in catalog) {
+      assertEquals(0, com.example.data.repository.BadgeValues(emptyMap()).current(badge))
+      assertEquals(badge.target - 1, com.example.data.repository.BadgeValues(mapOf(badge.metric to badge.target - 1)).current(badge))
+      assertEquals(badge.target, com.example.data.repository.BadgeValues(mapOf(badge.metric to badge.target + 5)).current(badge))
+    }
+    assertTrue(catalog.any { it.id == "seven_day_momentum" })
+    assertTrue(catalog.any { it.id == "recovery_builder" })
+  }
+
+  @Test
+  fun `celebration queue never repeats an unlocked badge`() {
+    val queue = com.example.viewmodel.CelebrationQueue()
+    queue.offer("first_step", com.example.viewmodel.JourneyCelebration(badgeId = "first_step"))
+    queue.offer("first_step", com.example.viewmodel.JourneyCelebration(badgeId = "first_step"))
+    queue.offer("level:2", com.example.viewmodel.JourneyCelebration(level = 2))
+    assertEquals("first_step", queue.peek()?.badgeId)
+    queue.remove()
+    assertEquals(2, queue.peek()?.level)
+    queue.remove()
+    queue.offer("first_step", com.example.viewmodel.JourneyCelebration(badgeId = "first_step"))
+    assertNull(queue.peek())
+  }
 }

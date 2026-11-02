@@ -5,6 +5,7 @@ import android.net.Uri
 import com.example.NewMeApplication
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
 import com.example.data.local.NewMeDatabase
 import com.example.data.backup.BackupStore
 import com.example.data.local.content.ReflectionItem
@@ -75,6 +76,8 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     val savingActivityLog = _savingActivityLog.asStateFlow()
     private val _savingActivityDistance = MutableStateFlow(false)
     val savingActivityDistance = _savingActivityDistance.asStateFlow()
+    private val _savingQuickLog = MutableStateFlow(false)
+    val savingQuickLog = _savingQuickLog.asStateFlow()
     val cycleEntries = cycleRepository.entries.catch { error ->
         if (error is CancellationException) throw error
         _operationError.value = "Cycle history could not be opened. Existing data was kept."
@@ -93,6 +96,10 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
         gamification.refresh()
         _achievementProgress.value = gamification.achievementProgress()
     })
+    val routines = RoutinesViewModel(database, getApplication(), clock, viewModelScope, writes)
+    val moments = MomentsViewModel(database, clock, viewModelScope, writes) { _operationError.value = it }
+    val daySummaries = database.daySummaryDao().observe()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     private val _loadState = MutableStateFlow<AppLoadState>(AppLoadState.Loading)
     val loadState = _loadState.asStateFlow()
     private val reload = MutableStateFlow(0)
@@ -120,6 +127,7 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
     val levelInfo: StateFlow<LevelInfo> = userProfile.map { profile ->
         repository.calculateLevelInfo(profile?.currentXp ?: 0)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LevelInfo(1, 0, 0, 100, 0f))
+    val badges = BadgesViewModel(database, application, viewModelScope, writes, achievementProgress, userProfile)
 
     private val _dailyReflection = MutableStateFlow<ReflectionItem?>(null)
     val dailyReflection: StateFlow<ReflectionItem?> = _dailyReflection.asStateFlow()
@@ -355,11 +363,7 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
         if (userProfile.value?.isOnboarded == true && reflectionContext != key) loadTodayReflection(reflectionPeriod, _currentMood.value)
     }
 
-    val reflectionPeriod: String get() = when (LocalDateTime.ofInstant(clock.instant(), clock.zone).hour) {
-        in 5..11 -> "MORNING"
-        in 12..16 -> "MIDDAY"
-        else -> "EVENING"
-    }
+    val reflectionPeriod: String get() = com.example.data.model.DayPart.at(LocalDateTime.ofInstant(clock.instant(), clock.zone).hour).checkinPeriod
 
     fun toggleChecklistItem(item: DailyChecklistItemEntity) {
         writes.launch {
@@ -517,6 +521,21 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun quickLog(onSaved: () -> Unit, action: suspend (String) -> Unit) {
+        if (_savingQuickLog.value || writes.isMaintaining) return
+        _savingQuickLog.value = true
+        val date = _selectedDate.value
+        writes.launch { try { action(date); onSaved() } finally { _savingQuickLog.value = false } }
+    }
+    fun saveQuickSleep(minutes: Int, quality: Int, onSaved: () -> Unit) = quickLog(onSaved) { date -> repository.logSleep(date, "", "", minutes, quality) }
+    fun saveQuickProtein(name: String, grams: Int, onSaved: () -> Unit) = quickLog(onSaved) { date -> repository.logProteinFood(date, name, "User-confirmed portion", grams) }
+    fun saveQuickMood(mood: String, onSaved: () -> Unit) = quickLog(onSaved) { date ->
+        val period = reflectionPeriod
+        val existing = database.dailyCheckinDao().getCheckinDirect(date, period) ?: DailyCheckinEntity(date = date, timeOfDay = period)
+        repository.saveDailyCheckin(existing.copy(mood = mood, isCompleted = true))
+        _currentMood.value = mood
+    }
+
     // Supplements
     fun toggleSupplementTaken(supplement: SupplementEntity, isTaken: Boolean) {
         writes.launch {
@@ -670,6 +689,30 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setAppearance(theme: ThemeMode, reducedMotion: Boolean) {
         writes.launch { settingsRepository.appearance(theme, reducedMotion) }
+    }
+
+    fun configureDashboard(modules: Set<String>, onSaved: () -> Unit = {}) { writes.launch { settingsRepository.dashboard(modules); onSaved() } }
+    fun configureMoments(enabled: Boolean, types: Set<String>) { writes.launch { settingsRepository.moments(enabled, types) } }
+    fun configureHaptics(enabled: Boolean) { writes.launch { settingsRepository.haptics(enabled) } }
+    fun completeJourneyOnboarding(profile: UserProfileEntity, preferences: OnboardingPreferences, modules: Set<String>, packs: Set<String>,
+        theme: ThemeMode, reducedMotion: Boolean, haptics: Boolean, taskReminders: Boolean, onSaved: () -> Unit) {
+        if (_savingOnboarding.value || writes.isMaintaining) return
+        _savingOnboarding.value = true
+        writes.launch {
+            try {
+                database.withTransaction {
+                    repository.completeOnboarding(profile, preferences)
+                    settingsRepository.dashboard(modules)
+                    settingsRepository.appearance(theme, reducedMotion)
+                    settingsRepository.haptics(haptics)
+                    reminderRepository.setTaskEnabled(taskReminders)
+                    com.example.data.routine.RoutinesRepository(database, clock).applyPacks(getApplication(), packs)
+                    cycleRepository.enabled(preferences.cycleEnabled)
+                    repository.setFirstMorningWelcomeSeen()
+                }
+                onSaved()
+            } finally { _savingOnboarding.value = false }
+        }
     }
 
     fun setCycleEnabled(enabled: Boolean) { writes.launch { cycleRepository.enabled(enabled) } }
@@ -932,6 +975,7 @@ class NewMeViewModel(application: Application) : AndroidViewModel(application) {
                 writes.withMaintenance {
                     ActivityTrackingService.stopForMaintenance()
                     repository.resetAllData()
+                    badges.resetPresentation()
                     voiceCompanion.stop()
                     _dailyReflection.value = null
                     _currentMood.value = "Okay"

@@ -2,18 +2,14 @@ package com.example.data.companion
 
 import com.example.data.local.entity.UserProfileEntity
 import com.example.data.model.ActivityKind
+import com.example.data.model.DayPart
 import com.example.data.repository.DailyGoalProgress
 import java.time.LocalTime
 
 object CompanionEngine {
 
     fun determineTimeOfDayContext(hour: Int = LocalTime.now().hour): TimeOfDayContext {
-        return when (hour) {
-            in 4..11 -> TimeOfDayContext.MORNING
-            in 12..16 -> TimeOfDayContext.MIDDAY
-            in 17..21 -> TimeOfDayContext.EVENING
-            else -> TimeOfDayContext.NIGHT
-        }
+        return TimeOfDayContext.valueOf(DayPart.at(hour).name)
     }
 
     fun parseMoodState(moodString: String?): MoodState {

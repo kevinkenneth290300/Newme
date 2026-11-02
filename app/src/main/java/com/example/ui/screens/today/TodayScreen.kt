@@ -42,7 +42,7 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 @Composable
-fun TodayScreen(
+internal fun LegacyTodayDetails(
     viewModel: NewMeViewModel,
     onNavigateToPlan: () -> Unit = {},
     onNavigateToGym: () -> Unit = {}
@@ -82,16 +82,10 @@ fun TodayScreen(
     var showProteinDialog by remember { mutableStateOf(false) }
     var showSleepDialog by remember { mutableStateOf(false) }
     var showActivityDialog by remember { mutableStateOf(false) }
-    var showFirstMorningWelcome by remember { mutableStateOf(false) }
     var showDetailedCheckin by rememberSaveable { mutableStateOf(false) }
     var reminderTask by remember { mutableStateOf<DailyChecklistItemEntity?>(null) }
     reminderTask?.let { TaskReminderDialog(viewModel, it) { reminderTask = null } }
 
-    // Check if user should see first morning welcome
-    LaunchedEffect(userProfile, selectedDate) {
-        showFirstMorningWelcome = userProfile?.isOnboarded == true &&
-            userProfile?.hasSeenFirstMorningWelcome == false && selectedDate == LocalDate.now().toString()
-    }
 
     val userCode = userProfile?.friendCode?.ifBlank {
         "NEWME-${userProfile?.name?.take(3)?.uppercase()?.ifBlank { "USR" } ?: "USR"}-2026"
@@ -637,14 +631,6 @@ fun TodayScreen(
         // =========================================================================
         // ENVIRONMENT & LIVING SPACE SECTION
         // =========================================================================
-        item {
-            EnvironmentMaintenanceSection(
-                tasks = environmentTasks,
-                onToggleTask = { viewModel.toggleEnvironmentTask(it) },
-                onAddTask = { title, category -> viewModel.addEnvironmentTask(title, category) },
-                onDeleteTask = { viewModel.deleteEnvironmentTask(it) }
-            )
-        }
 
         // =========================================================================
         // ACTIVE FOCUS CHECKLIST (Adherence tracking)
@@ -720,14 +706,6 @@ fun TodayScreen(
         // =========================================================================
         // ACCOUNTABILITY ALLIES
         // =========================================================================
-        if (friendConnections.isNotEmpty()) item {
-            FriendAccountabilityCard(
-                friends = friendConnections,
-                userCode = userCode,
-                onAddFriend = { code, name -> viewModel.addFriend(code, name) },
-                onRemoveFriend = { viewModel.removeFriend(it) }
-            )
-        }
 
         // =========================================================================
         // I'M FALLING OFF BUTTON
@@ -761,20 +739,6 @@ fun TodayScreen(
     // DIALOGS & MODALS
     // =========================================================================
 
-    // First Morning Welcome Dialog
-    if (showFirstMorningWelcome) {
-        FirstMorningWelcomeDialog(
-            name = userProfile?.name?.ifBlank { "there" } ?: "there",
-            isSaving = savingCheckin,
-            onDismiss = {
-                showFirstMorningWelcome = false
-                viewModel.markFirstMorningWelcomeSeen()
-            },
-            onComplete = { mood, intention ->
-                viewModel.saveWelcome(mood, intention) { showFirstMorningWelcome = false }
-            }
-        )
-    }
 
     if (showDetailedCheckin) {
         DailyCheckinDialog(initialTimeOfDay = viewModel.reflectionPeriod, onDismiss = { showDetailedCheckin = false },

@@ -39,56 +39,45 @@ class GamificationRepository(private val database: NewMeDatabase, private val cl
     suspend fun refresh() = database.withTransaction {
         val profile = database.userProfileDao().getUserProfileDirect()?.takeIf { it.isOnboarded } ?: return@withTransaction
         NewMeDatabase.seedInitialData(database)
-        val progress = DailyProgressRepository(database)
-        val days = database.dailyStateDao().getAll()
-        val qualifying = mutableSetOf<LocalDate>()
-        var proteinDays = 0
-        for (day in days) {
-            val records = progress.records(day.date)
-            if (DailyProgressRules.goal(records).met) qualifying.add(LocalDate.parse(day.date))
-            val grams = records.nutrition.protein.sumOf { it.proteinGrams } + records.nutrition.meals.filter { it.isCompleted }.sumOf { it.proteinGrams }
-            if (day.targetsKnown && day.proteinTargetGrams > 0 && grams >= day.proteinTargetGrams) proteinDays++
-        }
+        DaySummaryRepository(database, clock).sync()
         val today = LocalDate.now(clock)
-        val streak = DailyProgressRules.streak(today, qualifying)
-        if (database.settingsDao().get()?.goalChosen == true) {
+        val streak = database.daySummaryDao().streak(today.toString())
+        val totals = database.daySummaryDao().totals(today.toString())
+        if (database.settingsDao().get()?.goalChosen == true && !database.daySummaryDao().hasMissing()) {
             database.userProfileDao().updateStreakStats(streak.current, maxOf(profile.longestStreak, streak.longest),
                 maxOf(profile.perfectDays, streak.successfulDays), profile.recoveryDays, profile.isRecoveryActive)
         }
-        val count = database.rewardDao().count()
-        val activities = database.activitySessionDao().getTotalCompletedActivities().firstValue() +
-            database.workoutDao().getTotalCompletedWorkouts().firstValue()
-        val prep = database.rewardDao().countMatching("mealprep:%")
-        val recovered = qualifying.any { date -> date.isBefore(today.plusDays(1)) &&
-            date.minusDays(1) !in qualifying && qualifying.any { it.isBefore(date.minusDays(1)) } }
-        val rules = mapOf("first_step" to (count >= 1), "first_day" to (streak.successfulDays >= 1),
-            "seven_day_momentum" to (streak.longest >= 7), "thirty_day_momentum" to (streak.longest >= 30),
-            "protein_consistency" to (proteinDays >= 7), "activity_builder" to (activities >= 10),
-            "meal_prep_builder" to (prep >= 3), "recovery_builder" to recovered)
-        rules.filterValues { it }.keys.forEach { database.achievementDao().unlockOnce(it, today.toString()) }
+        val values = badgeValues(today.toString())
+        BadgeCatalog.all.filter { values.current(it) >= it.target }.forEach { database.achievementDao().unlockOnce(it.id, today.toString()) }
     }
 
     suspend fun achievementProgress(): List<AchievementProgress> = database.withTransaction {
-        val progress = DailyProgressRepository(database)
-        val days = database.dailyStateDao().getAll()
-        val qualifying = mutableSetOf<LocalDate>()
-        var proteinDays = 0
-        for (day in days) {
-            val records = progress.records(day.date)
-            if (DailyProgressRules.goal(records).met) qualifying.add(LocalDate.parse(day.date))
-            val grams = records.nutrition.protein.sumOf { it.proteinGrams } + records.nutrition.meals.filter { it.isCompleted }.sumOf { it.proteinGrams }
-            if (day.targetsKnown && day.proteinTargetGrams > 0 && grams >= day.proteinTargetGrams) proteinDays++
-        }
-        val streak = DailyProgressRules.streak(LocalDate.now(clock), qualifying)
-        val values = mapOf("first_step" to (database.rewardDao().count() to 1), "first_day" to (streak.successfulDays to 1),
-            "seven_day_momentum" to (streak.longest to 7), "thirty_day_momentum" to (streak.longest to 30),
-            "protein_consistency" to (proteinDays to 7), "activity_builder" to ((database.activitySessionDao().getTotalCompletedActivities().firstValue() +
-                database.workoutDao().getTotalCompletedWorkouts().firstValue()) to 10),
-            "meal_prep_builder" to (database.rewardDao().countMatching("mealprep:%") to 3), "recovery_builder" to (0 to 1))
+        val today = LocalDate.now(clock).toString()
+        val values = badgeValues(today)
         database.achievementDao().getAll().map { achievement ->
-            val (current, target) = values[achievement.id] ?: (0 to 1)
-            AchievementProgress(achievement, if (achievement.isUnlocked) target else current.coerceAtMost(target), target)
+            val badge = BadgeCatalog.all.firstOrNull { it.id == achievement.id }
+            val target = badge?.target ?: 1
+            AchievementProgress(achievement, if (achievement.isUnlocked) target else badge?.let(values::current) ?: 0, target)
         }
+    }
+
+    private suspend fun badgeValues(today: String): BadgeValues {
+        val summaries = database.daySummaryDao()
+        val totals = summaries.totals(today)
+        val streak = summaries.streak(today)
+        val profile = database.userProfileDao().getUserProfileDirect()
+        val sql = database.openHelper.readableDatabase
+        var routes = 0
+        var activityTypes = 0
+        sql.query("SELECT COUNT(*) FROM (SELECT activity_tracks.sessionKey FROM activity_tracks JOIN route_points ON activity_tracks.sessionKey = route_points.sessionKey WHERE activity_tracks.status = 'FINISHED' GROUP BY activity_tracks.sessionKey HAVING COUNT(route_points.id) >= 2)").use { if (it.moveToFirst()) routes = it.getInt(0) }
+        sql.query("SELECT COUNT(*) FROM (SELECT activityType FROM activity_sessions WHERE isCompleted = 1 UNION SELECT activityType FROM activity_tracks WHERE status = 'FINISHED')").use { if (it.moveToFirst()) activityTypes = it.getInt(0) }
+        return BadgeValues(mapOf(BadgeMetric.ACTIONS to database.rewardDao().count(), BadgeMetric.GOALS to totals.goalDays,
+            BadgeMetric.STREAK to maxOf(streak.longest, profile?.longestStreak ?: 0), BadgeMetric.COMEBACKS to summaries.comebacks(today, "-1 day"),
+            BadgeMetric.PROTEIN to totals.proteinDays, BadgeMetric.WATER to totals.waterDays, BadgeMetric.PREP to database.rewardDao().countMatching("mealprep:%"),
+            BadgeMetric.SLEEP to totals.sleepDays, BadgeMetric.ACTIVITIES to (database.activitySessionDao().getTotalCompletedActivities().firstValue() + database.workoutDao().getTotalCompletedWorkouts().firstValue()),
+            BadgeMetric.ROUTES to routes, BadgeMetric.ACTIVITY_TYPES to activityTypes, BadgeMetric.STEPS to totals.maxSteps, BadgeMetric.DISTANCE to totals.meters.coerceAtMost(Int.MAX_VALUE.toDouble()).toInt(),
+            BadgeMetric.GYM_WEEKS to summaries.gymWeeks(today), BadgeMetric.ROUTINE_DAYS to totals.routineDays, BadgeMetric.CHECKINS to totals.checkins,
+            BadgeMetric.PERFECT_QUESTS to totals.perfectQuests, BadgeMetric.EARLY_DAYS to totals.earlyDays, BadgeMetric.LEVEL to (profile?.currentLevel ?: 1), BadgeMetric.FRESH_STARTS to summaries.comebacks(today, "-3 day")))
     }
 
     private suspend fun kotlinx.coroutines.flow.Flow<Int>.firstValue(): Int = first()

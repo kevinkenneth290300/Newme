@@ -312,7 +312,7 @@ class BackupStore(
     }
 
     private fun tableNames(sql: SupportSQLiteDatabase): List<String> = buildList {
-        sql.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('room_master_table', 'android_metadata') ORDER BY name").use {
+        sql.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('room_master_table', 'android_metadata', 'summary_dirty') ORDER BY name").use {
             while (it.moveToNext()) add(it.getString(0))
         }
     }

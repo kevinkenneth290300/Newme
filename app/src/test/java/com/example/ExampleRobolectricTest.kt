@@ -113,6 +113,7 @@ class ExampleRobolectricTest {
       )
       db.userProfileDao().insertOrUpdateProfile(original)
       val today = java.time.LocalDate.now().toString()
+      seedTestQuest(db, today)
       val item = db.dailyChecklistDao().getChecklistForDateDirect(today).first()
       db.dailyChecklistDao().setCompleted(item.id, true, "08:00 AM")
       db.bodyMeasurementDao().insertMeasurement(BodyMeasurementEntity(date = "2020-01-01", weightKg = 72f))
@@ -323,7 +324,7 @@ class ExampleRobolectricTest {
       .addMigrations(*DatabaseMigrations.ALL).allowMainThreadQueries().build()
     try {
       val sql = db.openHelper.writableDatabase
-      assertEquals(6, sql.version)
+      assertEquals(7, sql.version)
       for ((table, rows) in before) assertEquals("Changed records in $table", rows, snapshotRows(sql, table))
       assertEquals(1240, db.userProfileDao().getUserProfileDirect()?.currentXp)
       assertEquals(4, db.userProfileDao().getUserProfileDirect()?.currentStreak)
@@ -358,6 +359,7 @@ class ExampleRobolectricTest {
       val repo = NewMeRepository(db)
       repo.completeOnboarding(UserProfileEntity(name = "Synthetic User"))
       val date = java.time.LocalDate.now().toString()
+      seedTestQuest(db, date)
       val count = db.dailyChecklistDao().getChecklistForDateDirect(date).size
       (1..8).map { async { repo.ensureDateInitialized(date) } }.awaitAll()
       assertEquals(count, db.dailyChecklistDao().getChecklistForDateDirect(date).size)
@@ -412,6 +414,28 @@ class ExampleRobolectricTest {
     }
   }
 
+  @Test
+  fun `phase two fresh onboarding and new days never seed sample tasks`() = runBlocking<Unit> {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(context, NewMeDatabase::class.java).allowMainThreadQueries().build()
+    try {
+      val clock = java.time.Clock.fixed(java.time.Instant.parse("2020-01-10T12:00:00Z"), java.time.ZoneOffset.UTC)
+      val repo = NewMeRepository(db, clock)
+      repo.completeOnboarding(UserProfileEntity(name = "Synthetic User", usesRecommendedPlan = false))
+      for (date in listOf("2020-01-10", "2020-01-11")) {
+        repo.ensureDateInitialized(date)
+        assertTrue(db.dailyChecklistDao().getChecklistForDateDirect(date).isEmpty())
+        assertTrue(db.environmentTaskDao().getTasksForDate(date).first().isEmpty())
+        assertTrue(db.nutritionDao().getMealsForDateDirect(date).isEmpty())
+        org.junit.Assert.assertNotNull(db.dailyStateDao().get(date))
+      }
+    } finally { db.close() }
+  }
+
+  private suspend fun seedTestQuest(db: NewMeDatabase, date: String) {
+    db.dailyChecklistDao().insertItem(DailyChecklistItemEntity(date = date, section = "MORNING", title = "Synthetic quest"))
+  }
+
   private fun snapshotRows(sql: androidx.sqlite.db.SupportSQLiteDatabase, table: String): List<List<String?>> = buildList {
     sql.query("SELECT * FROM `$table` ORDER BY rowid").use { cursor ->
       while (cursor.moveToNext()) add(List(cursor.columnCount) { if (cursor.isNull(it)) null else cursor.getString(it) })
@@ -453,6 +477,7 @@ class ExampleRobolectricTest {
       val repo = NewMeRepository(db)
       repo.completeOnboarding(UserProfileEntity(name = "Synthetic User"))
       val date = java.time.LocalDate.now().toString()
+      seedTestQuest(db, date)
       val item = db.dailyChecklistDao().getChecklistForDateDirect(date).first()
       (1..12).map { async { repo.toggleChecklistItem(item) } }.awaitAll()
       val once = db.userProfileDao().getUserProfileDirect()!!.currentXp
@@ -592,6 +617,7 @@ class ExampleRobolectricTest {
       val yesterday = "2020-01-09"
       val original = db.dailyStateDao().get(today)!!.copy(date = yesterday)
       db.dailyStateDao().insert(original)
+      seedTestQuest(db, today)
       val item = db.dailyChecklistDao().getChecklistForDateDirect(today).first()
       repo.toggleChecklistItem(item)
       val game = GamificationRepository(db, clock)
@@ -844,6 +870,7 @@ class ExampleRobolectricTest {
       val clock = java.time.Clock.fixed(java.time.Instant.parse("2020-01-10T12:00:00Z"), java.time.ZoneOffset.UTC)
       val repo = NewMeRepository(db, clock)
       repo.completeOnboarding(UserProfileEntity(name = "Synthetic User"))
+      seedTestQuest(db, "2020-01-10")
       val reminders = com.example.data.reminder.ReminderRepository(db, clock)
       val scheduler = com.example.data.reminder.ReminderScheduler(context, db, clock)
       val alarms = org.robolectric.Shadows.shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
@@ -942,14 +969,29 @@ class ExampleRobolectricTest {
       val legacyTables = org.json.JSONArray()
       for (index in 0 until tables.length()) {
         val table = tables.getJSONObject(index)
-        if (table.getString("name") != "reminders") legacyTables.put(table)
+        if (table.getString("name") !in setOf("reminders", "routine_templates", "routine_completions", "day_summary", "moment_log")) {
+          if (table.getString("name") == "app_settings") {
+            val columns = table.getJSONArray("columns")
+            val rows = table.getJSONArray("rows")
+            val originalColumns = org.json.JSONArray()
+            for (column in 0 until 12) originalColumns.put(columns.getString(column))
+            val originalRows = org.json.JSONArray()
+            for (rowIndex in 0 until rows.length()) {
+              val originalRow = org.json.JSONArray()
+              for (column in 0 until 12) originalRow.put(rows.getJSONArray(rowIndex).getJSONArray(column))
+              originalRows.put(originalRow)
+            }
+            table.put("columns", originalColumns).put("rows", originalRows)
+          }
+          legacyTables.put(table)
+        }
       }
       val schema = context.assets.open("com.example.data.local.NewMeDatabase/5.json")
         .bufferedReader().use { JSONObject(it.readText()).getJSONObject("database") }
       json.put("tables", legacyTables).put("schemaVersion", 5).put("identityHash", schema.getString("identityHash"))
       val older = cipher.encrypt(json.toString().toByteArray(Charsets.UTF_8), password)
       val migrated = store.prepare(older, password)
-      assertEquals(6, migrated.schemaVersion)
+      assertEquals(7, migrated.schemaVersion)
       repo.resetAllData()
       store.restore(migrated)
       assertEquals("Existing User", db.userProfileDao().getUserProfileDirect()?.name)

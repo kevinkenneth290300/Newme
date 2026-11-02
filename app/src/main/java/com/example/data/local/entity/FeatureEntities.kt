@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.Index
 import androidx.room.ForeignKey
+import androidx.room.ColumnInfo
 
 @Entity(tableName = "app_settings")
 data class AppSettingsEntity(
@@ -18,7 +19,15 @@ data class AppSettingsEntity(
     val taskRemindersEnabled: Boolean = false,
     val quietStartMinutes: Int = 1320,
     val quietEndMinutes: Int = 420,
-    val legacyRewardCutoffDate: String = ""
+    val legacyRewardCutoffDate: String = "",
+    @ColumnInfo(defaultValue = "'ROUTINES,MEALS,GYM,ACTIVITY,WATER,SLEEP,CYCLE'") val enabledModules: String = "ROUTINES,MEALS,GYM,ACTIVITY,WATER,SLEEP,CYCLE",
+    @ColumnInfo(defaultValue = "0") val dashboardSetupDone: Boolean = false,
+    @ColumnInfo(defaultValue = "1") val momentsEnabled: Boolean = true,
+    @ColumnInfo(defaultValue = "0") val hapticsEnabled: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val pinnedBadges: String = "",
+    @ColumnInfo(defaultValue = "''") val starterPacks: String = "",
+    @ColumnInfo(defaultValue = "'sleep,mood,focus,energy,hydrate,win,profile,comeback'") val momentTypes: String = "sleep,mood,focus,energy,hydrate,win,profile,comeback",
+    @ColumnInfo(defaultValue = "0") val cycleCheckinsEnabled: Boolean = false
 )
 
 @Entity(tableName = "daily_state")
@@ -57,7 +66,8 @@ data class CycleEntryEntity(
 @Entity(tableName = "reminders", foreignKeys = [ForeignKey(
     entity = DailyChecklistItemEntity::class, parentColumns = ["id"], childColumns = ["taskId"],
     onDelete = ForeignKey.CASCADE
-)], indices = [Index("taskId")])
+), ForeignKey(entity = RoutineTemplateEntity::class, parentColumns = ["id"], childColumns = ["routineId"],
+    onDelete = ForeignKey.CASCADE)], indices = [Index("taskId"), Index("routineId")])
 data class ReminderEntity(
     @PrimaryKey val key: String,
     val kind: String,
@@ -65,5 +75,6 @@ data class ReminderEntity(
     val minuteOfDay: Int = 540,
     val enabled: Boolean = false,
     val timeSensitive: Boolean = false,
-    val lastDeliveredToken: String = ""
+    val lastDeliveredToken: String = "",
+    @ColumnInfo(defaultValue = "NULL") val routineId: Long? = null
 )

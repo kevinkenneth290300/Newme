@@ -13,8 +13,8 @@ android {
     applicationId = "com.aistudio.newme.trkfit"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.1"
+    versionCode = 3
+    versionName = "2.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -48,7 +48,7 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
   sourceSets.getByName("main").assets.directories.add("$projectDir/schemas")
   sourceSets.getByName("androidTest").assets.directories.add("$projectDir/schemas")
-  sourceSets.getByName("test").resources.srcDir("$projectDir/schemas")
+  sourceSets.getByName("test").resources.directories.add("$projectDir/schemas")
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
@@ -108,6 +108,8 @@ dependencies {
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
+  testImplementation("androidx.room:room-testing:${libs.versions.roomRuntime.get()}")
+  androidTestImplementation("androidx.room:room-testing:${libs.versions.roomRuntime.get()}")
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)

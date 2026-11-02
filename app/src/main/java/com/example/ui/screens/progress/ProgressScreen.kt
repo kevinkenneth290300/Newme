@@ -37,7 +37,7 @@ import com.example.viewmodel.NewMeViewModel
 import java.time.LocalDate
 
 @Composable
-fun ProgressScreen(viewModel: NewMeViewModel) {
+internal fun LegacyProgressDetails(viewModel: NewMeViewModel) {
     val measurements by viewModel.bodyMeasurements.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val achievements by viewModel.achievements.collectAsStateWithLifecycle()

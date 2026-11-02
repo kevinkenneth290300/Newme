@@ -33,7 +33,7 @@ import com.example.ui.theme.*
 import com.example.viewmodel.NewMeViewModel
 
 @Composable
-fun SystemScreen(
+internal fun LegacySystemDetails(
     viewModel: NewMeViewModel,
     onRerunOnboarding: () -> Unit = {}
 ) {
@@ -472,7 +472,7 @@ private fun RuleCard(number: String, title: String, description: String) {
 }
 
 @Composable
-private fun EditProfileDialog(
+internal fun EditProfileDialog(
     profile: UserProfileEntity,
     onSave: (UserProfileEntity) -> Unit,
     onDismiss: () -> Unit

@@ -92,7 +92,7 @@ fun SplashScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "CALIBRATING PROTOCOLS...",
+                text = androidx.compose.ui.res.stringResource(if (isLoading) com.example.R.string.loading_local else com.example.R.string.ready),
                 color = NewMeTextMuted,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.SemiBold,

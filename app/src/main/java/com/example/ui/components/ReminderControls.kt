@@ -56,16 +56,18 @@ private fun TimeControl(label: String, minute: Int, enabled: Boolean = true, onC
 }
 
 @Composable
-private fun notificationConsent(viewModel: NewMeViewModel): ((() -> Unit) -> Unit) {
+internal fun notificationConsent(viewModel: NewMeViewModel): ((() -> Unit) -> Unit) {
     val context = LocalContext.current
     var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        viewModel.moments.permissionOpen.value = false
         if (granted) pending?.invoke() else viewModel.reminderPermissionDenied()
         pending = null
     }
     return { action ->
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             pending = action
+            viewModel.moments.permissionOpen.value = true
             launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else action()
     }

@@ -61,6 +61,8 @@ class GreetingScreenshotTest {
       model.repository.resetAllData()
       model.repository.completeOnboarding(UserProfileEntity(name = "Synthetic User"), OnboardingPreferences(DailyGoalKind.TASKS, 3))
       model.repository.setFirstMorningWelcomeSeen()
+      val database = NewMeDatabase.getInstance(application)
+      database.settingsDao().save(database.settingsDao().get()!!.copy(dashboardSetupDone = true, momentsEnabled = false))
     }
     val theme = mutableStateOf(ThemeMode.LIGHT)
     composeTestRule.setContent {

@@ -55,6 +55,7 @@ fun ActivityControls(viewModel: NewMeViewModel) {
     var discard by rememberSaveable { mutableStateOf(false) }
     val kind = ActivityKind.valueOf(kindName)
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+        viewModel.moments.permissionOpen.value = false
         val fine = ActivityTrackingService.canUseGps(context)
         if (gps && !fine) permissionMessage = "Precise GPS was not granted or is unavailable. Starting timer only; distance can be entered manually."
         if (kind.countsSteps && !ActivityTrackingService.hasStepAccess(context)) permissionMessage = "Step permission denied. Timer/manual logging remains available."
@@ -73,7 +74,7 @@ fun ActivityControls(viewModel: NewMeViewModel) {
             if (gps && !fine) permissionMessage = "GPS is unavailable. Starting timer only; distance can be entered manually."
             viewModel.startActivity(kind, gps && fine)
         }
-        else permissionLauncher.launch(permissions.toTypedArray())
+        else { viewModel.moments.permissionOpen.value = true; permissionLauncher.launch(permissions.toTypedArray()) }
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Live Activity", style = MaterialTheme.typography.titleMedium)

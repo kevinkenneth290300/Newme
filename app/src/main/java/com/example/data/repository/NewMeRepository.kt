@@ -133,7 +133,6 @@ class NewMeRepository(private val database: NewMeDatabase, private val clock: Cl
                 )
             }
             ensureDateInitialized(today)
-            ensureEnvironmentTasksForDate(today)
         }
     }
 
@@ -179,6 +178,8 @@ class NewMeRepository(private val database: NewMeDatabase, private val clock: Cl
     }
 
     suspend fun addChecklistItem(item: DailyChecklistItemEntity) {
+        require(item.title.isNotBlank() && item.title.length <= 80) { "Enter a task title of 1 to 80 characters." }
+        LocalDate.parse(item.date)
         dailyChecklistDao.insertItem(item)
     }
 
@@ -198,79 +199,10 @@ class NewMeRepository(private val database: NewMeDatabase, private val clock: Cl
             targetsKnown = date == LocalDate.now(clock).toString(),
             activityEnabled = profile.selectedActivities.isNotBlank()
         ))
-        val activities = profile.selectedActivities.split(",").filter { it.isNotBlank() }.map(ActivityKind::fromStored).toSet()
-        val hasGym = ActivityKind.GYM in activities
-        val hasWalking = ActivityKind.WALKING in activities
-        val hasRunning = ActivityKind.RUNNING in activities
-        val hasYoga = ActivityKind.YOGA in activities
-        val hasDance = ActivityKind.DANCING in activities
-        val hasSports = ActivityKind.SPORTS in activities
-        val hasGeneralActive = ActivityKind.OTHER in activities
-        val usesSupps = profile?.usesSupplements == true
-        val usesRecommendedPlan = profile?.usesRecommendedPlan == true
-
-        val existing = dailyChecklistDao.getChecklistForDateDirect(date)
-        if (existing.isEmpty()) {
-            val items = mutableListOf<DailyChecklistItemEntity>()
-            var order = 0
-
-            // MORNING
-            items.add(DailyChecklistItemEntity(date = date, section = "MORNING", title = "Morning Hydration (500ml water)", isCompleted = false, xpReward = 10, orderIndex = order++))
-            items.add(DailyChecklistItemEntity(date = date, section = "MORNING", title = if (usesRecommendedPlan) "High-Protein Breakfast (shake, eggs, or chilla)" else "Healthy Breakfast", isCompleted = false, xpReward = 15, orderIndex = order++))
-            if (usesSupps) {
-                items.add(DailyChecklistItemEntity(date = date, section = "MORNING", title = "Morning Multivitamin / Supplements", isCompleted = false, xpReward = 10, orderIndex = order++))
-            }
-
-            // LUNCH
-            items.add(DailyChecklistItemEntity(date = date, section = "LUNCH", title = if (usesRecommendedPlan) "Indian Foundation Lunch + 200g Vegetables" else "Balanced Lunch with Protein", isCompleted = false, xpReward = 15, orderIndex = order++))
-            items.add(DailyChecklistItemEntity(date = date, section = "LUNCH", title = "1,000ml Water reached by 2:00 PM", isCompleted = false, xpReward = 10, orderIndex = order++))
-            items.add(DailyChecklistItemEntity(date = date, section = "LUNCH", title = "No processed junk or sugary drinks", isCompleted = false, xpReward = 15, orderIndex = order++))
-
-            // ACTIVITY / MOVEMENT
-            if (hasGym) {
-                items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Gym warm-up & mobility", isCompleted = false, xpReward = 10, orderIndex = order++))
-                items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Strength training session completed", isCompleted = false, xpReward = 30, orderIndex = order++))
-                items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Log exercise weights & reps", isCompleted = false, xpReward = 10, orderIndex = order++))
-            }
-            if (hasWalking) {
-                items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Brisk Walk (30-45 mins / step target)", isCompleted = false, xpReward = 20, orderIndex = order++))
-            }
-            if (hasRunning) {
-                items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Running session completed", isCompleted = false, xpReward = 25, orderIndex = order++))
-            }
-            if (hasYoga) {
-                items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Yoga flow & posture alignment", isCompleted = false, xpReward = 20, orderIndex = order++))
-            }
-            if (hasDance) {
-                items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Dance movement practice session", isCompleted = false, xpReward = 20, orderIndex = order++))
-            }
-            if (hasSports) {
-                items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Sports practice / match", isCompleted = false, xpReward = 25, orderIndex = order++))
-            }
-            if (ActivityKind.CYCLING in activities) items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Cycling session", xpReward = 20, orderIndex = order++))
-            if (ActivityKind.SWIMMING in activities) items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Swimming session (timer or manual log)", xpReward = 20, orderIndex = order++))
-            if (hasGeneralActive && !hasGym && !hasWalking && !hasRunning) {
-                items.add(DailyChecklistItemEntity(date = date, section = "ACTIVITY", title = "Active movement (30+ mins)", isCompleted = false, xpReward = 20, orderIndex = order++))
-            }
-
-            // DINNER
-            items.add(DailyChecklistItemEntity(date = date, section = "DINNER", title = if (usesRecommendedPlan) "Foundation Dinner (Paneer/Eggs/Shake) + 200g Veg" else "Clean Dinner with Protein", isCompleted = false, xpReward = 15, orderIndex = order++))
-            items.add(DailyChecklistItemEntity(date = date, section = "DINNER", title = "Hit daily protein target (${profile?.proteinTargetGrams ?: 90}g)", isCompleted = false, xpReward = 25, orderIndex = order++))
-
-            // NIGHT
-            items.add(DailyChecklistItemEntity(date = date, section = "NIGHT", title = "Daily Water target achieved (${profile?.waterTargetLiters ?: 2.5f} L)", isCompleted = false, xpReward = 15, orderIndex = order++))
-            items.add(DailyChecklistItemEntity(date = date, section = "NIGHT", title = "Wind down & prepare for ${profile?.sleepTargetHours ?: 7.5f}h sleep", isCompleted = false, xpReward = 15, orderIndex = order++))
-
-            dailyChecklistDao.insertAll(items)
-        }
-
         val existingMeals = nutritionDao.getMealsForDateDirect(date)
-        if (existingMeals.isEmpty()) {
+        if (profile.usesRecommendedPlan && existingMeals.isEmpty()) {
             nutritionDao.insertMeals(MealSuggestions.forDate(profile, date))
         }
-
-        // Ensure environment & life maintenance tasks are initialized for the date
-        initializeEnvironmentTasks(date)
     }
 
     // Nutrition & Protein
@@ -548,51 +480,6 @@ class NewMeRepository(private val database: NewMeDatabase, private val clock: Cl
     }
 
     suspend fun ensureEnvironmentTasksForDate(date: String) = ensureDateInitialized(date)
-
-    private suspend fun initializeEnvironmentTasks(date: String) {
-        val existing = environmentTaskDao.getTasksForDateDirect(date)
-        if (existing.isNotEmpty()) return
-
-        val localDate = LocalDate.parse(date)
-        val dayOfWeek = localDate.dayOfWeek.toString().lowercase().replaceFirstChar { it.uppercase() }
-
-        val tasks = mutableListOf<EnvironmentTaskEntity>()
-        var order = 0
-
-        // Daily Routines
-        tasks.add(EnvironmentTaskEntity(date = date, category = "MORNING", title = "Make bed & open windows for natural light", orderIndex = order++))
-        tasks.add(EnvironmentTaskEntity(date = date, category = "MORNING", title = "Drink 500ml water before coffee/tea", orderIndex = order++))
-        tasks.add(EnvironmentTaskEntity(date = date, category = "MORNING", title = "Write down today's top 3 non-negotiables", orderIndex = order++))
-
-        tasks.add(EnvironmentTaskEntity(date = date, category = "LEAVING_HOME", title = "Kitchen sink clear of dishes", orderIndex = order++))
-        tasks.add(EnvironmentTaskEntity(date = date, category = "LEAVING_HOME", title = "Essential check: keys, wallet, phone, water bottle", orderIndex = order++))
-
-        tasks.add(EnvironmentTaskEntity(date = date, category = "AFTER_WORK", title = "10-minute rapid room & desk tidy", orderIndex = order++))
-        tasks.add(EnvironmentTaskEntity(date = date, category = "AFTER_WORK", title = "Hang work clothes & change into movement attire", orderIndex = order++))
-
-        tasks.add(EnvironmentTaskEntity(date = date, category = "BEFORE_SLEEP", title = "Kitchen counter wiped & trash checked", orderIndex = order++))
-        tasks.add(EnvironmentTaskEntity(date = date, category = "BEFORE_SLEEP", title = "Set out tomorrow's workout/work clothes", orderIndex = order++))
-        tasks.add(EnvironmentTaskEntity(date = date, category = "BEFORE_SLEEP", title = "Phone on charger away from bed", orderIndex = order++))
-
-        // Weekly Focus Schedule based on current day
-        when (dayOfWeek) {
-            "Monday" -> tasks.add(EnvironmentTaskEntity(date = date, category = "WEEKLY", title = "Monday Focus: Weekly budget & financial check-in", dayOfWeek = dayOfWeek, orderIndex = order++))
-            "Tuesday" -> tasks.add(EnvironmentTaskEntity(date = date, category = "WEEKLY", title = "Tuesday Focus: Desk declutter & filing documents", dayOfWeek = dayOfWeek, orderIndex = order++))
-            "Wednesday" -> tasks.add(EnvironmentTaskEntity(date = date, category = "WEEKLY", title = "Wednesday Focus: Bathroom deep clean & mid-week grocery restock", dayOfWeek = dayOfWeek, orderIndex = order++))
-            "Thursday" -> tasks.add(EnvironmentTaskEntity(date = date, category = "WEEKLY", title = "Thursday Focus: Dedicated learning / reading block", dayOfWeek = dayOfWeek, orderIndex = order++))
-            "Friday" -> tasks.add(EnvironmentTaskEntity(date = date, category = "WEEKLY", title = "Friday Focus: Weekly review & weekend discipline plan", dayOfWeek = dayOfWeek, orderIndex = order++))
-            "Saturday" -> {
-                tasks.add(EnvironmentTaskEntity(date = date, category = "WEEKLY", title = "Saturday Focus: Room deep vacuum & laundry / fresh bedsheets", dayOfWeek = dayOfWeek, orderIndex = order++))
-                tasks.add(EnvironmentTaskEntity(date = date, category = "WEEKLY", title = "Saturday Focus: Personal grooming & barber/nail care", dayOfWeek = dayOfWeek, orderIndex = order++))
-            }
-            "Sunday" -> {
-                tasks.add(EnvironmentTaskEntity(date = date, category = "WEEKLY", title = "Sunday Focus: Meal prep foundation (boil eggs, soak pulses, prep sabzi)", dayOfWeek = dayOfWeek, orderIndex = order++))
-                tasks.add(EnvironmentTaskEntity(date = date, category = "WEEKLY", title = "Sunday Focus: Digital declutter (delete photos, clear inbox, backup data)", dayOfWeek = dayOfWeek, orderIndex = order++))
-            }
-        }
-
-        environmentTaskDao.insertAll(tasks)
-    }
 
     // Daily Companion Check-ins (Morning, Midday, Evening)
     fun getDailyCheckin(date: String, timeOfDay: String): Flow<DailyCheckinEntity?> =

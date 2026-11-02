@@ -37,7 +37,7 @@ import java.time.LocalDate
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun OnboardingScreen(
+internal fun LegacyOnboardingScreen(
     viewModel: NewMeViewModel,
     onLaunchToday: () -> Unit
 ) {

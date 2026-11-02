@@ -3,7 +3,25 @@
 Private, offline Android habit tracking for separate installations. No accounts,
 analytics, synchronization, automatic upload, or remote map service. Each phone
 keeps its own records. The application ID remains `com.aistudio.newme.trkfit`.
-Current source version: **1.1, version code 2, Room schema 6**.
+Current source version: **2.0, version code 3, Room schema 7**.
+
+## Training Arc
+
+Today uses Ember, up to five due quests, real goal/XP progress and illustrated
+quick logs. Routines have daily, selected-weekday, weekly and clamped monthly
+recurrence; a new installation has no sample quests. Starter packs and meal
+ideas are opt-in. Adding a routine pack enables its Routines module without
+changing unrelated module choices. Routine/reminder form writes are atomic.
+Settings opens from the profile control; enabled modules
+determine which of the five tabs are visible.
+
+Moments are optional illustrated morning/midday/evening questions, at most one
+per eligible open. Later and Skip are always available; opening/skipping earns
+no XP. Partial answers persist locally, and a completed check-in pays its
+existing reward once. Night belongs to the preceding evening until 04:00.
+The 24-badge collection keeps existing IDs/unlocks, supports three pins, and
+uses local summaries rather than loading every historical day's records after
+each write. Artwork and poster replacements are documented in [docs/ART.md](docs/ART.md).
 
 ## Setup And Builds
 
@@ -50,7 +68,7 @@ PBKDF2-HMAC-SHA256 (600,000 iterations). Maximum plaintext size is 64 MiB.
 
 Restore authenticates the archive first, reconstructs a private temporary
 database from a bundled schema, applies explicit Room migrations, and checks
-constraints before offering replacement. Schema versions **4, 5, and 6** are
+constraints before offering replacement. Schema versions **4 through 7** are
 supported. Unknown versions/hashes, damaged archives, wrong passwords, failed
 writes, and cancellation must not replace live records. Confirmation replaces
 all user tables atomically. Temporary files are removed after preparation and
@@ -64,9 +82,11 @@ not fertility, contraception, pregnancy, or medical guidance.
 
 ## Reminders And Permissions
 
-Reminders are off by default. System settings offer task notification controls,
+Reminders are off by default and explicitly opt-in during setup or Settings.
+Settings offers task notification controls,
 a recurring daily check-in, quiet hours, and independently opt-in private cycle
-reminders. Checklist bell controls configure one reminder for that saved task
+reminders. Routine editors reuse the same scheduling/permission rules.
+Checklist bell controls in Details configure one reminder for that saved task
 and its recorded date. Completing or deleting the task suppresses its reminder.
 Cycle notifications and their channel use generic private text, never period
 dates or symptoms. Predictions without sufficient reliable history do not
@@ -160,17 +180,42 @@ Robolectric and screenshots do not establish physical sensor, screen-off,
 manufacturer scheduling, signed-upgrade, or real-device accessibility behavior.
 Those gates remain manual until checked on authorized hardware.
 
-## Verified On 1 November 2026
+## Verified Phase 2 Build
 
-- Clean unit/Robolectric test run: **53 passed**, zero failures/skips
-  (32 database/activity/reminder, 17 unit, 4 UI/screenshot checks).
+- Clean unit/Robolectric test run: **72 passed**, zero failures/errors/skips
+  (33 existing database/activity/reminder, 23 unit, 5 journey database,
+  5 journey workflow, and 6 component/theme screenshot tests).
 - `lintDebug` passed with warnings and no errors; `assembleDebug` passed.
+- Light/dark screenshots were recorded with enlarged text; reduced-motion,
+  module navigation, due filtering, saved state and seven-step setup checks passed.
+- Schema 6-to-7 migration preserved synthetic rows in every released table;
+  older encrypted backup restoration and the 2,000-day query-count fixture passed.
 - Merged manifest retains the application ID, disables automatic backup,
   and contains no Internet or background-location permission.
-- The version-1.1 debug APK passed `apksigner verify` with APK Signature Scheme
+- The version-2.0/code-3 debug APK passed `apksigner verify` with APK Signature Scheme
   v2 and the standard **Android Debug** certificate. Local artifact:
   [app-debug.apk](app/build/outputs/apk/debug/app-debug.apk).
+- APK size: **23,081,013 bytes**, within the Phase 2 growth budget.
+- APK SHA-256: `D2C76502B26188DD692E4BEBBDA773E8EF2E2EA4ED050710CBD7FD01D02EC328`.
+- Public debug certificate SHA-256:
+  `60ee3aa6667bd7bf6e808c5275201f79482bb5eeea06e72acc38c776320df819`.
 - **Not release-verified:** release signing inputs/keystore were unavailable,
   and `adb devices` reported no attached device. No signed release, public
   release-certificate fingerprint, physical-phone run, or in-place signed
   upgrade was produced or claimed. Nothing was published.
+
+## Lint Triage
+
+Remaining warnings are intentionally recorded, not suppressed wholesale:
+
+| Category | Count | Disposition |
+| --- | ---: | --- |
+| GradleDependency / NewerVersionAvailable / AGP version | 37 | Retain the tested toolchain; dependency upgrades need their own compatibility run. |
+| UnusedResources | 9 | Retain bundled font licence, original legacy artwork and legacy resources; no personal data or remote assets. |
+| UseKtx | 7 | Existing API-style suggestions, not correctness failures; defer unrelated mechanical changes. |
+| IconDipSize | 2 | Existing launcher sizing; review on the manual device matrix. |
+| RedundantLabel | 1 | Existing explicit activity label; harmless and consistent with application branding. |
+| DiscouragedApi | 1 | Intentional cached local poster-slot lookup for optional user-supplied raster replacements. |
+
+New context-retention and plural warnings were fixed. Original sensor, screen-off,
+TalkBack/largest-font device checks and same-key signed upgrades remain manual.

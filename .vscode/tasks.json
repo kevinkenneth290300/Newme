@@ -2,6 +2,14 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "NewMe: Validate Phase Two",
+			"type": "shell",
+			"command": "& { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-21*' | Select-Object -First 1).FullName; $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk'; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:testDebugUnitTest --tests 'com.example.Journey*' --console=plain --no-configuration-cache; exit $LASTEXITCODE }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
 			"label": "NewMe: Export Room Schema",
 			"type": "shell",
 			"command": "& { if (-not $env:JAVA_HOME) { $env:JAVA_HOME = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'NewMeTools') -Directory -Filter 'jdk-17*' | Select-Object -First 1).FullName }; if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\\Sdk' }; $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'; & .\\gradlew.bat :app:kspDebugKotlin --console=plain --no-configuration-cache }",

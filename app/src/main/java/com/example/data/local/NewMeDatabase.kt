@@ -39,9 +39,14 @@ import com.example.data.local.entity.*
         ActiveTrackingEntity::class,
         TrackingDayTotalEntity::class,
         RoutePointEntity::class,
-        ReminderEntity::class
+        ReminderEntity::class,
+        RoutineTemplateEntity::class,
+        RoutineCompletionEntity::class,
+        DaySummaryEntity::class,
+        SummaryDirtyEntity::class,
+        MomentLogEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class NewMeDatabase : RoomDatabase() {
@@ -68,6 +73,9 @@ abstract class NewMeDatabase : RoomDatabase() {
     abstract fun cycleDao(): CycleDao
     abstract fun activityTrackingDao(): ActivityTrackingDao
     abstract fun reminderDao(): ReminderDao
+    abstract fun routineDao(): RoutineDao
+    abstract fun daySummaryDao(): DaySummaryDao
+    abstract fun momentDao(): MomentDao
 
     companion object {
         @Volatile
@@ -81,6 +89,9 @@ abstract class NewMeDatabase : RoomDatabase() {
                     "newme_master.db"
                 )
                     .addMigrations(*DatabaseMigrations.ALL)
+                    .addCallback(object : Callback() {
+                        override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) { SummaryTracking.install(db) }
+                    })
                     .build()
                 INSTANCE = instance
                 instance
@@ -88,16 +99,9 @@ abstract class NewMeDatabase : RoomDatabase() {
         }
 
         suspend fun seedInitialData(database: NewMeDatabase) {
-            val initialAchievements = listOf(
-                AchievementEntity("first_step", "FIRST STEP", "Complete your first NewMe action", "ic_flag", isUnlocked = false, unlockedDate = null),
-                AchievementEntity("first_day", "FIRST DAY", "Complete your first day", "ic_flag", isUnlocked = false, unlockedDate = null),
-                AchievementEntity("seven_day_momentum", "7 DAY MOMENTUM", "Maintain 7 successful days", "ic_fire", isUnlocked = false, unlockedDate = null),
-                AchievementEntity("protein_consistency", "PROTEIN CONSISTENCY", "Hit protein target on 7 days", "ic_nutrition", isUnlocked = false, unlockedDate = null),
-                AchievementEntity("activity_builder", "ACTIVITY BUILDER", "Complete 10 activity sessions", "ic_gym", isUnlocked = false, unlockedDate = null),
-                AchievementEntity("meal_prep_builder", "MEAL PREP BUILDER", "Complete meal preparation multiple times", "ic_kitchen", isUnlocked = false, unlockedDate = null),
-                AchievementEntity("recovery_builder", "RECOVERY BUILDER", "Successfully return after an interrupted day", "ic_restart", isUnlocked = false, unlockedDate = null),
-                AchievementEntity("thirty_day_momentum", "30 DAY MOMENTUM", "Build 30 successful days", "ic_star", isUnlocked = false, unlockedDate = null)
-            )
+            val initialAchievements = com.example.data.repository.BadgeCatalog.all.mapIndexed { index, badge ->
+                AchievementEntity(badge.id, badge.id, badge.id, "badge:$index", isUnlocked = false, unlockedDate = null)
+            }
             database.achievementDao().insertAll(initialAchievements)
         }
     }
